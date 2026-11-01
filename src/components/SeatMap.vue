@@ -50,6 +50,12 @@ const sideText = (g: Guest) => (g.side === 'groom' ? '男方' : g.side === 'brid
 const rsvpBadge = (g: Guest) => (g.rsvp === 'yes' ? 'ok' : g.rsvp === 'no' ? 'mute' : 'warn')
 const rsvpText = (g: Guest) => (g.rsvp === 'yes' ? '确认' : g.rsvp === 'no' ? '婉拒' : '待复')
 
+// 圆桌围坐宾客圆点：沿内环均匀分布
+function dotStyle(i: number, total: number) {
+  const angle = (i / total) * 360 - 90
+  return { transform: `rotate(${angle}deg) translate(var(--seat-r, 34px)) rotate(${-angle}deg)` }
+}
+
 async function seatGuest(g: Guest) {
   if (!activeTable.value) return
   try {
@@ -88,36 +94,32 @@ async function unseatGuest(g: Guest) {
       </EmptyState>
     </div>
 
-    <!-- 桌位图 -->
+    <!-- 桌位图：圆桌交错排列 -->
     <div class="floor card mt16" v-else>
       <div class="stage">🎀 舞 台 🎀</div>
       <div class="aisle-label"><span>中 央 过 道</span></div>
       <div class="floor-grid">
         <div class="side-col">
-          <div v-for="t in leftTables" :key="t" class="table-card" :class="{ over: seatSum(t) > capacity }" @click="activeTable = t">
-            <div class="t-head">
-              <span class="t-name">{{ t }} 桌</span>
-              <span class="t-count num" :class="{ 'over-num': seatSum(t) > capacity }">{{ seatSum(t) }}/{{ capacity }}</span>
+          <div v-for="t in leftTables" :key="t" class="table-card" :class="{ over: seatSum(t) > capacity }" :title="atTable(t).map(g => `${g.name}×${g.count || 1}`).join('、') || '空桌'" @click="activeTable = t">
+            <div class="table-circle">
+              <span v-for="i in Math.min(seatSum(t), 16)" :key="i" class="seat-dot" :style="dotStyle(i, Math.min(seatSum(t), 16))"></span>
+              <span class="t-no">{{ t }}</span>
+              <span class="t-seats num" :class="{ 'over-num': seatSum(t) > capacity }">{{ seatSum(t) }}/{{ capacity }}</span>
             </div>
-            <div class="t-body" v-if="atTable(t).length">
-              <span v-for="g in atTable(t)" :key="g.id" class="chip">{{ g.name }}<template v-if="(g.count || 1) > 1"> ×{{ g.count }}</template></span>
-            </div>
-            <div class="t-empty" v-else>空桌 · 点击入座</div>
+            <div class="t-names" v-if="atTable(t).length">{{ atTable(t).map(g => g.name).join('、') }}</div>
           </div>
         </div>
         <div class="aisle">
           <div class="aisle-line"></div>
         </div>
         <div class="side-col">
-          <div v-for="t in rightTables" :key="t" class="table-card" :class="{ over: seatSum(t) > capacity }" @click="activeTable = t">
-            <div class="t-head">
-              <span class="t-name">{{ t }} 桌</span>
-              <span class="t-count num" :class="{ 'over-num': seatSum(t) > capacity }">{{ seatSum(t) }}/{{ capacity }}</span>
+          <div v-for="t in rightTables" :key="t" class="table-card" :class="{ over: seatSum(t) > capacity }" :title="atTable(t).map(g => `${g.name}×${g.count || 1}`).join('、') || '空桌'" @click="activeTable = t">
+            <div class="table-circle">
+              <span v-for="i in Math.min(seatSum(t), 16)" :key="i" class="seat-dot" :style="dotStyle(i, Math.min(seatSum(t), 16))"></span>
+              <span class="t-no">{{ t }}</span>
+              <span class="t-seats num" :class="{ 'over-num': seatSum(t) > capacity }">{{ seatSum(t) }}/{{ capacity }}</span>
             </div>
-            <div class="t-body" v-if="atTable(t).length">
-              <span v-for="g in atTable(t)" :key="g.id" class="chip">{{ g.name }}<template v-if="(g.count || 1) > 1"> ×{{ g.count }}</template></span>
-            </div>
-            <div class="t-empty" v-else>空桌 · 点击入座</div>
+            <div class="t-names" v-if="atTable(t).length">{{ atTable(t).map(g => g.name).join('、') }}</div>
           </div>
         </div>
       </div>
@@ -188,28 +190,54 @@ async function unseatGuest(g: Guest) {
 .floor-grid {
   display: grid; grid-template-columns: 1fr 46px 1fr; gap: 0 8px;
 }
-.side-col { display: flex; flex-direction: column; gap: 10px; }
+.side-col { display: flex; flex-direction: column; gap: 16px; }
 .aisle { display: flex; justify-content: center; }
 .aisle-line {
   width: 0; border-left: 2px dashed var(--line); height: 100%; min-height: 200px;
 }
+
+/* 圆桌交错排列：奇偶行左右错位 */
 .table-card {
-  border: 1.5px solid var(--line); border-radius: var(--radius);
-  background: var(--card); padding: 10px 12px; cursor: pointer;
-  transition: all .15s; min-height: 52px;
+  width: 128px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  cursor: pointer;
 }
-.table-card:hover { border-color: var(--primary); box-shadow: var(--shadow); transform: translateY(-1px); }
-.table-card.over { border-color: var(--danger); }
-.t-head { display: flex; justify-content: space-between; align-items: baseline; }
-.t-name { font-weight: 700; font-size: 14px; }
-.t-count { font-size: 12px; color: var(--muted); font-weight: 700; }
+.side-col .table-card:nth-child(odd) { align-self: flex-start; margin-left: 8px; }
+.side-col .table-card:nth-child(even) { align-self: flex-end; margin-right: 8px; }
+
+.table-circle {
+  --seat-r: 34px;
+  position: relative; width: 92px; height: 92px; border-radius: 50%;
+  border: 2px solid var(--line); background: var(--card);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0; transition: all .15s; box-shadow: var(--shadow);
+}
+.table-circle::before {
+  content: ''; position: absolute; inset: 7px; border-radius: 50%;
+  border: 1px dashed var(--line);
+}
+.table-card:hover .table-circle {
+  border-color: var(--primary); transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(60, 58, 50, 0.14);
+}
+.table-card.over .table-circle { border-color: var(--danger); }
+.table-card.over .table-circle::before { border-color: var(--danger-soft); }
+.t-no { font-size: 13.5px; font-weight: 800; line-height: 1.2; }
+.t-seats { font-size: 11px; color: var(--muted); font-weight: 700; }
 .over-num { color: var(--danger); }
-.t-body { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
-.t-body .chip {
-  font-size: 11px; padding: 2px 8px; cursor: default;
-  background: var(--primary-soft); color: var(--text); border: none; font-weight: 500;
+
+.seat-dot {
+  position: absolute; top: 50%; left: 50%;
+  width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px var(--card);
 }
-.t-empty { font-size: 11.5px; color: var(--muted); margin-top: 6px; }
+.table-card.over .seat-dot { background: var(--danger); }
+
+.t-names {
+  font-size: 11px; color: var(--muted); text-align: center; line-height: 1.35;
+  max-width: 128px; overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
 
 .modal-sec { margin-bottom: 16px; }
 .modal-sec h4 { font-size: 13.5px; margin-bottom: 8px; color: var(--secondary); }
@@ -220,9 +248,15 @@ async function unseatGuest(g: Guest) {
   .floor { padding: 10px; }
   .stage { font-size: 14px; padding: 11px; letter-spacing: 4px; }
   .floor-grid { grid-template-columns: 1fr 14px 1fr; gap: 0 4px; }
-  .table-card { padding: 8px 9px; min-height: 44px; }
-  .t-name { font-size: 12.5px; }
-  .t-body .chip { font-size: 10px; padding: 2px 6px; }
-  .t-empty { font-size: 10px; }
+  .side-col { gap: 10px; }
+  .side-col .table-card:nth-child(odd) { margin-left: 0; }
+  .side-col .table-card:nth-child(even) { margin-right: 0; }
+  .table-card { width: 96px; }
+  .table-circle { --seat-r: 26px; width: 70px; height: 70px; }
+  .table-circle::before { inset: 5px; }
+  .t-no { font-size: 11.5px; }
+  .t-seats { font-size: 9.5px; }
+  .seat-dot { width: 6px; height: 6px; margin: -3px 0 0 -3px; }
+  .t-names { font-size: 9.5px; max-width: 96px; }
 }
 </style>
