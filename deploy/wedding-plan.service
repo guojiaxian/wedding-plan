@@ -1,0 +1,21 @@
+[Unit]
+Description=Wedding Plan web service (Vue3 + Express + SQLite, port 19002)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__APP_DIR__
+EnvironmentFile=__APP_DIR__/.env
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+RestartSec=3
+
+# 资源硬限（2G 机器预算：新服务 <=400MB，见《新服务环境准备要求.md》第 4 节）
+MemoryMax=400M
+
+# 轻量加固
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
