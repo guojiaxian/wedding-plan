@@ -27,7 +27,9 @@ onMounted(load)
 
 const totalBudget = computed(() => summary.value?.budget.totalBudget || 0)
 const totalSpent = computed(() => summary.value?.budget.totalSpent || 0)
-const percent = computed(() => totalBudget.value ? Math.round((totalSpent.value / totalBudget.value) * 100) : 0)
+// 未设置总预算时不展示比例类数据（环图/百分比/剩余），仅显示已花费
+const hasBudget = computed(() => totalBudget.value > 0)
+const percent = computed(() => hasBudget.value ? Math.round((totalSpent.value / totalBudget.value) * 100) : 0)
 const catName = (id: number | null) => cats.value.find(c => c.id === id)?.name || '未分类'
 
 // ===== 分类编辑 =====
@@ -114,26 +116,27 @@ function barClass(spent: number, budget: number) {
 
     <!-- 总览 -->
     <div class="card overview">
-      <RingChart :percent="percent" :size="136" :color="percent > 100 ? '#C96F6F' : ''">
+      <RingChart v-if="hasBudget" :percent="percent" :size="136" :color="percent > 100 ? '#C96F6F' : ''">
         <div class="num" style="font-size: 24px; font-weight: 800" :style="{ color: percent > 100 ? 'var(--danger)' : 'var(--primary-deep)' }">{{ percent }}%</div>
         <div class="muted" style="font-size: 11px">已使用</div>
       </RingChart>
       <div class="ov-stats">
         <div class="ov-item">
           <div class="muted">总预算</div>
-          <div class="num big">¥{{ money(totalBudget) }}</div>
+          <div class="num big" v-if="hasBudget">¥{{ money(totalBudget) }}</div>
+          <div class="big muted" v-else style="font-size: 16px; line-height: 2">未设置</div>
         </div>
         <div class="ov-item">
           <div class="muted">已花费</div>
           <div class="num big pink">¥{{ money(totalSpent) }}</div>
         </div>
-        <div class="ov-item">
+        <div class="ov-item" v-if="hasBudget">
           <div class="muted">剩余</div>
           <div class="num big" :style="{ color: totalBudget - totalSpent >= 0 ? 'var(--success)' : 'var(--danger)' }">¥{{ money(totalBudget - totalSpent) }}</div>
         </div>
       </div>
-      <div class="ov-tip muted" v-if="!totalBudget">
-        💡 还未设置总预算，<router-link to="/settings" class="pink">去设置</router-link>
+      <div class="ov-tip muted" v-if="!hasBudget">
+        💡 还未设置总预算，<router-link to="/settings" class="pink">去设置</router-link>后即可查看使用比例与剩余额度
       </div>
     </div>
 

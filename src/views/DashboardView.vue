@@ -17,9 +17,11 @@ onMounted(async () => {
 })
 
 const countdown = computed(() => store.countdownDays)
+// 未设置总预算（0/空）时不展示比例类数据
+const hasBudget = computed(() => (summary.value?.budget.totalBudget || 0) > 0)
 const budgetPercent = computed(() => {
   const b = summary.value?.budget
-  if (!b || !b.totalBudget) return 0
+  if (!b || !hasBudget.value) return 0
   return Math.round((b.totalSpent / b.totalBudget) * 100)
 })
 const itemPercent = computed(() => {
@@ -75,11 +77,16 @@ async function finishTask(t: Task) {
 
     <!-- 四项进度 -->
     <div class="stat-grid mt16" v-if="summary">
-      <div class="stat-card">
+      <div class="stat-card" v-if="hasBudget">
         <div class="label">💰 预算使用</div>
         <div class="value pink">{{ budgetPercent }}%</div>
         <div class="sub">已花 ¥{{ money(summary.budget.totalSpent) }}</div>
         <div class="progress mt8"><i :style="{ width: budgetPercent + '%' }" /></div>
+      </div>
+      <div class="stat-card" v-else>
+        <div class="label">💸 已花费</div>
+        <div class="value num">¥{{ money(summary.budget.totalSpent) }}</div>
+        <div class="sub">未设置总预算 · <router-link to="/settings" class="pink">去设置</router-link></div>
       </div>
       <div class="stat-card">
         <div class="label">🛍️ 物品购置</div>
