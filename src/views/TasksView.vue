@@ -48,20 +48,25 @@ async function cycleStatus(t: Task) {
 }
 
 const modal = ref(false)
-const form = reactive({ id: 0, title: '', phase: 'm6', due_date: '', status: 'todo' as Task['status'], assignee: '', note: '' })
+const form = reactive({ id: 0, title: '', phase: 'm6', due_date: '', dateTbd: true, status: 'todo' as Task['status'], assignee: '', note: '' })
 
+function onDueTbdChange(v: boolean) {
+  form.dateTbd = v
+  if (v) form.due_date = ''
+}
 function openNew(phase: string) {
-  Object.assign(form, { id: 0, title: '', phase, due_date: '', status: 'todo' as Task['status'], assignee: '', note: '' })
+  Object.assign(form, { id: 0, title: '', phase, due_date: '', dateTbd: true, status: 'todo' as Task['status'], assignee: '', note: '' })
   modal.value = true
 }
 function openEdit(t: Task) {
-  Object.assign(form, { id: t.id, title: t.title, phase: t.phase, due_date: t.due_date, status: t.status, assignee: t.assignee, note: t.note })
+  Object.assign(form, { id: t.id, title: t.title, phase: t.phase, due_date: t.due_date, dateTbd: !t.due_date, status: t.status, assignee: t.assignee, note: t.note })
   modal.value = true
 }
 async function save() {
   if (!form.title.trim()) return toast('请填写任务内容', 'err')
   try {
-    const body = { ...form }
+    const body = { ...form, due_date: form.dateTbd ? '' : form.due_date }
+    delete (body as any).dateTbd
     if (form.id) await api.put(`/tasks/${form.id}`, body)
     else await api.post('/tasks', body)
     modal.value = false
@@ -119,6 +124,7 @@ function overdue(t: Task) {
             <div class="name">{{ t.title }}</div>
             <div class="sub">
               <span v-if="t.due_date" :class="{ 'over-due': overdue(t) }">截止 {{ t.due_date }}</span>
+              <span v-else class="tbd-badge">截止待定</span>
               <span v-if="t.assignee"> · 👤 {{ t.assignee }}</span>
               <span v-if="t.note"> · {{ t.note }}</span>
             </div>
@@ -146,7 +152,12 @@ function overdue(t: Task) {
         </div>
         <div class="field">
           <label>截止日期</label>
-          <input class="input" type="date" v-model="form.due_date" />
+          <div class="date-row">
+            <input class="input" type="date" v-model="form.due_date" :disabled="form.dateTbd" />
+            <label class="tbd-toggle">
+              <input type="checkbox" class="ck" :checked="form.dateTbd" @change="onDueTbdChange(($event.target as HTMLInputElement).checked)" /> 待定
+            </label>
+          </div>
         </div>
         <div class="field">
           <label>负责人</label>

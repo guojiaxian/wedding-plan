@@ -65,22 +65,26 @@ async function removeCat(c: BudgetCategory) {
 
 // ===== 支出编辑 =====
 const expModal = ref(false)
-const expForm = reactive({ id: 0, name: '', amount: 0, category_id: null as number | null, date: '', note: '' })
+const expForm = reactive({ id: 0, name: '', amount: 0, category_id: null as number | null, date: '', dateTbd: false, note: '' })
 
 function today() { return new Date().toISOString().slice(0, 10) }
+function onExpDateTbd(v: boolean) {
+  expForm.dateTbd = v
+  if (v) expForm.date = ''
+}
 
 function openExpNew() {
-  Object.assign(expForm, { id: 0, name: '', amount: 0, category_id: cats.value[0]?.id ?? null, date: today(), note: '' })
+  Object.assign(expForm, { id: 0, name: '', amount: 0, category_id: cats.value[0]?.id ?? null, date: today(), dateTbd: false, note: '' })
   expModal.value = true
 }
 function openExpEdit(e: Expense) {
-  Object.assign(expForm, { id: e.id, name: e.name, amount: e.amount, category_id: e.category_id, date: e.date, note: e.note })
+  Object.assign(expForm, { id: e.id, name: e.name, amount: e.amount, category_id: e.category_id, date: e.date, dateTbd: !e.date, note: e.note })
   expModal.value = true
 }
 async function saveExp() {
   if (!expForm.name.trim()) return toast('请填写支出名称', 'err')
   try {
-    const body = { name: expForm.name, amount: Number(expForm.amount) || 0, category_id: expForm.category_id, date: expForm.date, note: expForm.note }
+    const body = { name: expForm.name, amount: Number(expForm.amount) || 0, category_id: expForm.category_id, date: expForm.dateTbd ? '' : expForm.date, note: expForm.note }
     if (expForm.id) await api.put(`/expenses/${expForm.id}`, body)
     else await api.post('/expenses', body)
     expModal.value = false
@@ -173,7 +177,7 @@ function barClass(spent: number, budget: number) {
         <div v-for="e in expenses" :key="e.id" class="row">
           <div class="grow">
             <div class="name">{{ e.name }}</div>
-            <div class="sub">{{ e.date || '未记日期' }} · {{ catName(e.category_id) }}<span v-if="e.note"> · {{ e.note }}</span></div>
+            <div class="sub"><span v-if="e.date">{{ e.date }}</span><span v-else class="tbd-badge">日期待定</span> · {{ catName(e.category_id) }}<span v-if="e.note"> · {{ e.note }}</span></div>
           </div>
           <div class="price num">¥{{ money(e.amount) }}</div>
           <div class="ops">
@@ -216,7 +220,12 @@ function barClass(spent: number, budget: number) {
         </div>
         <div class="field">
           <label>日期</label>
-          <input class="input" type="date" v-model="expForm.date" />
+          <div class="date-row">
+            <input class="input" type="date" v-model="expForm.date" :disabled="expForm.dateTbd" />
+            <label class="tbd-toggle">
+              <input type="checkbox" class="ck" :checked="expForm.dateTbd" @change="onExpDateTbd(($event.target as HTMLInputElement).checked)" /> 待定
+            </label>
+          </div>
         </div>
         <div class="field">
           <label>预算分类</label>

@@ -331,6 +331,19 @@ input[type="checkbox"].ck {
 .mt8 { margin-top: 8px; } .mt16 { margin-top: 16px; } .mt24 { margin-top: 24px; }
 .mb8 { margin-bottom: 8px; } .mb16 { margin-bottom: 16px; }
 
+/* 日期 + 待定 组合控件 */
+.date-row { display: flex; align-items: center; gap: 8px; }
+.date-row .input { flex: 1; }
+.tbd-toggle {
+  display: flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 13px; color: var(--secondary); font-weight: 600; cursor: pointer; user-select: none;
+}
+.tbd-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11.5px; font-weight: 600; border-radius: 999px; padding: 1px 8px;
+  background: var(--warning-soft); color: var(--warning);
+}
+
 /* 路由切换过渡 */
 .fade-enter-active, .fade-leave-active { transition: opacity .18s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }

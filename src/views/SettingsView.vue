@@ -21,6 +21,7 @@ function pickTheme(t: ThemeName) {
 const form = reactive({
   groom_name: '', bride_name: '', wedding_date: '', venue: '', total_budget: 0
 })
+const weddingTbd = ref(false) // 婚期待定：清空日期并以标记显示
 const saving = ref(false)
 const importing = ref(false)
 const fileInput = ref<HTMLInputElement>()
@@ -33,13 +34,19 @@ onMounted(() => {
       wedding_date: s.wedding_date, venue: s.venue,
       total_budget: Number(s.total_budget) || 0
     })
+    weddingTbd.value = !s.wedding_date
   }).catch((e: any) => toast(e.message, 'err'))
 })
+
+function toggleWeddingTbd(v: boolean) {
+  weddingTbd.value = v
+  if (v) form.wedding_date = ''
+}
 
 async function save() {
   saving.value = true
   try {
-    await store.saveSettings({ ...form, total_budget: Number(form.total_budget) || 0 })
+    await store.saveSettings({ ...form, wedding_date: weddingTbd.value ? '' : form.wedding_date, total_budget: Number(form.total_budget) || 0 })
     toast('已保存 ✓')
   } catch (e: any) { toast(e.message, 'err') }
   saving.value = false
@@ -107,7 +114,12 @@ async function clearAll() {
         </div>
         <div class="field">
           <label>婚礼日期</label>
-          <input class="input" type="date" v-model="form.wedding_date" />
+          <div class="date-row">
+            <input class="input" type="date" v-model="form.wedding_date" :disabled="weddingTbd" />
+            <label class="tbd-toggle">
+              <input type="checkbox" class="ck" :checked="weddingTbd" @change="toggleWeddingTbd(($event.target as HTMLInputElement).checked)" /> 待定
+            </label>
+          </div>
         </div>
         <div class="field">
           <label>婚礼场地</label>

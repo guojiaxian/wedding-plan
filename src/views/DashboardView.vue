@@ -60,6 +60,7 @@ async function finishTask(t: Task) {
       <div class="hero-left">
         <div class="hero-names">{{ store.coupleText }}</div>
         <div class="hero-line" v-if="store.dateText">📅 {{ store.dateText }}</div>
+        <div class="hero-line" v-else>📅 婚期待定 <span class="tbd-badge">待定</span></div>
         <div class="hero-line" v-if="store.settings?.venue">📍 {{ store.settings.venue }}</div>
         <div class="hero-line muted" v-else>📍 待定婚礼场地 · <router-link to="/settings" class="pink">去设置</router-link></div>
       </div>
@@ -70,7 +71,7 @@ async function finishTask(t: Task) {
         </template>
         <template v-else>
           <div class="n">💍</div>
-          <div class="t"><router-link to="/settings">设置婚礼日期</router-link></div>
+          <div class="t">婚期待定</div>
         </template>
       </div>
     </div>
@@ -121,6 +122,7 @@ async function finishTask(t: Task) {
             <div class="name">{{ t.title }}</div>
             <div class="sub">
               <span v-if="t.due_date">截止 {{ t.due_date }}</span>
+              <span v-else>截止待定</span>
               <span v-if="t.assignee"> · {{ t.assignee }}</span>
             </div>
           </div>

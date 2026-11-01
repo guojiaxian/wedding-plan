@@ -20,7 +20,7 @@ function toggleTheme() {
 const pageTitle = computed(() => route.meta.title as string)
 const countdown = computed(() => store.countdownDays)
 const countdownText = computed(() => {
-  if (countdown.value === null) return '设置婚期'
+  if (countdown.value === null) return '婚期待定'
   if (countdown.value > 0) return `倒数 ${countdown.value} 天`
   if (countdown.value === 0) return '今天大喜 🎉'
   return '新婚快乐'
@@ -47,7 +47,7 @@ const countdownText = computed(() => {
     </div>
     <router-link to="/settings" class="side-countdown" v-else style="display:block">
       <div class="n" style="font-size:20px">📅</div>
-      <div class="t">点击设置婚礼日期</div>
+      <div class="t">婚期待定 · 点击设置</div>
     </router-link>
     <button class="theme-btn" @click="toggleTheme">🎨 主题：{{ THEME_LABEL[theme] }}</button>
   </aside>
