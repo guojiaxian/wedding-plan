@@ -140,7 +140,7 @@ function cycleRsvp(g: Guest) {
           <div class="sub">
             <span v-if="g.relationship">{{ g.relationship }}</span>
             <span v-if="g.phone"> · 📞 {{ g.phone }}</span>
-            <span v-if="g.rsvp === 'yes' && g.gift != null" class="gold"> · 礼金 ¥{{ money(g.gift) }}</span>
+            <span v-if="g.rsvp === 'yes' && g.gift != null && g.gift !== ''" class="gold"> · 礼金 ¥{{ money(g.gift) }}</span>
             <span v-if="g.note"> · {{ g.note }}</span>
           </div>
         </div>

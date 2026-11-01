@@ -206,12 +206,13 @@ async function removeCat(c: ItemCategory) {
             </div>
             <div class="sub">
               <span v-if="!i.purchased">预计 ¥{{ money(i.estimated_price) }}</span>
-              <span v-else>实付 ¥{{ money(i.actual_price) }}</span>
+              <span v-else-if="i.actual_price != null">实付 ¥{{ money(i.actual_price) }}</span>
+              <span v-else>已购 · 实付未填（暂按预计 ¥{{ money(i.estimated_price) }}）</span>
               <span v-if="i.channel"> · {{ i.channel }}</span>
               <span v-if="i.note"> · {{ i.note }}</span>
             </div>
           </div>
-          <div class="price num">¥{{ money(i.purchased ? i.actual_price : i.estimated_price) }}</div>
+          <div class="price num">¥{{ money(i.purchased ? (i.actual_price ?? i.estimated_price) : i.estimated_price) }}</div>
           <div class="ops">
             <button class="btn btn-icon" @click="openEdit(i)">✏️</button>
             <button class="btn btn-icon btn-danger-ghost" @click="remove(i)">🗑️</button>

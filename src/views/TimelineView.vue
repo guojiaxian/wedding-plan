@@ -16,10 +16,14 @@ async function load() {
 onMounted(load)
 
 const totalDurationMin = computed(() => events.value.reduce((s, e) => {
-  const m = e.duration.match(/(\d+(?:\.\d+)?)/)
-  if (!m) return s
-  const v = parseFloat(m[1])
-  return s + (e.duration.includes('小时') ? v * 60 : v)
+  // 支持“1小时30分钟”等多段时长：逐段累加
+  const re = /(\d+(?:\.\d+)?)\s*(小时|分钟)?/g
+  let m, total = s
+  while ((m = re.exec(e.duration || ''))) {
+    const v = parseFloat(m[1])
+    total += m[2] === '小时' ? v * 60 : v
+  }
+  return total
 }, 0))
 
 const modal = ref(false)

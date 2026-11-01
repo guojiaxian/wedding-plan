@@ -12,6 +12,7 @@ export const useAppStore = defineStore('app', {
     countdownDays(state): number | null {
       if (!state.settings?.wedding_date) return null
       const target = new Date(state.settings.wedding_date + 'T00:00:00')
+      if (isNaN(target.getTime())) return null // 非法日期（如经 API 写入）时不显示 NaN
       const today = new Date()
       today.setHours(0, 0, 0, 0)
       return Math.round((target.getTime() - today.getTime()) / 86400000)

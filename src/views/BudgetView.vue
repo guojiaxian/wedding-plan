@@ -53,7 +53,7 @@ async function saveCat() {
   } catch (e: any) { toast(e.message, 'err') }
 }
 async function removeCat(c: BudgetCategory) {
-  if (!confirm(`删除分类「${c.name}」？关联的支出记录不会被删除。`)) return
+  if (!confirm(`删除分类「${c.name}」？其名下支出记录将保留并继续计入总支出（显示为“未分类”）。`)) return
   try {
     await api.del(`/budget-categories/${c.id}`)
     toast('已删除')

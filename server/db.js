@@ -14,6 +14,10 @@ db.exec('PRAGMA journal_mode = WAL;')
 
 // ---------- 建表 ----------
 db.exec(`
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   groom_name TEXT DEFAULT '',
@@ -152,9 +156,13 @@ export function clearData() {
 }
 
 // ---------- 模板数据 ----------
+const TZ = process.env.TZ || 'Asia/Shanghai'
+const _fmt = new Intl.DateTimeFormat('sv-SE', { timeZone: TZ }) // sv-SE → YYYY-MM-DD
+export function localDate(d = new Date()) {
+  return _fmt.format(d)
+}
 function daysLater(n) {
-  const d = new Date(Date.now() + n * 86400000)
-  return d.toISOString().slice(0, 10)
+  return localDate(new Date(Date.now() + n * 86400000))
 }
 
 export const TIMELINE_TEMPLATE = [
@@ -295,9 +303,20 @@ export function seedTemplate() {
     ['home', '红色床品四件套', 0, '自制', '', 1],
     ['home', '压床娃娃', 0, '自制', '', 2]
   ].forEach(r => de.run(...r))
+
+  markSeeded()
 }
 
 export function isEmpty() {
   const row = db.prepare('SELECT COUNT(*) AS n FROM items').get()
   return Number(row.n) === 0
+}
+
+// 首次初始化标记：只存于 meta 表，不随 clearData/备份清除。
+// 防止用户「清空数据」后服务重启时模板数据被重新写入（数据复活缺陷）。
+export function isSeeded() {
+  return !!db.prepare("SELECT value FROM meta WHERE key = 'seeded'").get()
+}
+export function markSeeded() {
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('seeded', '1')").run()
 }

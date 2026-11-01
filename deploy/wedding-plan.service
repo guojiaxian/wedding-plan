@@ -5,7 +5,8 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=__APP_DIR__
-EnvironmentFile=__APP_DIR__/.env
+# “-”前缀：.env 不存在时跳过而不是启动失败
+EnvironmentFile=-__APP_DIR__/.env
 ExecStart=/usr/bin/node server/index.js
 Restart=on-failure
 RestartSec=3
