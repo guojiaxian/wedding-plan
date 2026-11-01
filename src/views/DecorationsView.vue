@@ -4,6 +4,9 @@ import { api, toast } from '../api/client'
 import type { Decoration } from '../api/types'
 import UiModal from '../components/UiModal.vue'
 import EmptyState from '../components/EmptyState.vue'
+import SeatMap from '../components/SeatMap.vue'
+
+const tab = ref<'list' | 'seats'>('list')
 
 const AREAS = [
   { key: 'sign', label: '签到区', icon: '✍️' },
@@ -79,9 +82,17 @@ async function remove(d: Decoration) {
   <div>
     <div class="page-head">
       <h2 class="page-title"><span class="ico">🎀</span>现场布置</h2>
-      <button class="btn btn-primary" @click="openNew('ceremony')">＋ 添加布置项</button>
+      <div class="page-actions">
+        <button class="btn" @click="openNew('ceremony')">＋ 添加布置项</button>
+      </div>
     </div>
 
+    <div class="chip-row mb16">
+      <button class="chip" :class="{ active: tab === 'list' }" @click="tab = 'list'">🎀 布置清单</button>
+      <button class="chip" :class="{ active: tab === 'seats' }" @click="tab = 'seats'">🪑 座位排布</button>
+    </div>
+
+    <template v-if="tab === 'list'">
     <div class="card stat-line">
       <span>共 <b class="num">{{ stats.total }}</b> 项</span>
       <span>已就绪 <b class="num" style="color: var(--success)">{{ stats.done }}</b> 项</span>
@@ -117,6 +128,10 @@ async function remove(d: Decoration) {
         </div>
       </div>
     </div>
+
+    </template>
+
+    <SeatMap v-else />
 
     <UiModal :open="modal" :title="form.id ? '编辑布置项' : '添加布置项'" @close="modal = false">
       <div class="form-grid">

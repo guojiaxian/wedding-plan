@@ -80,6 +80,7 @@ setInterval(backupDB, 6 * 3600 * 1000).unref()
 
 // ---------- 资源字段白名单 ----------
 const SCHEMA = {
+  'item-categories': { table: 'item_categories', fields: ['key', 'name', 'icon', 'sort'], order: 'sort, id' },
   'budget-categories': { table: 'budget_categories', fields: ['name', 'budget', 'sort'], order: 'sort, id' },
   expenses: { table: 'expenses', fields: ['category_id', 'name', 'amount', 'date', 'note'], order: 'date DESC, id DESC' },
   items: { table: 'items', fields: ['category', 'name', 'budget_category_id', 'estimated_price', 'actual_price', 'purchased', 'channel', 'note', 'sort'], order: 'sort, id' },
@@ -98,7 +99,12 @@ for (const [route, conf] of Object.entries(SCHEMA)) {
 
   api.post(`/${route}`, (req, res) => {
     try {
-      res.json(insertRow(conf.table, conf.fields, pick(req.body, conf.fields)))
+      const data = pick(req.body, conf.fields)
+      // 物品自定义分类：未提供 key 时自动生成唯一 key
+      if (conf.table === 'item_categories' && !data.key) {
+        data.key = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      }
+      res.json(insertRow(conf.table, conf.fields, data))
     } catch (e) { res.status(400).json({ error: e.message }) }
   })
 
@@ -109,6 +115,12 @@ for (const [route, conf] of Object.entries(SCHEMA)) {
   })
 
   api.delete(`/${route}/:id`, (req, res) => {
+    // 删除物品分类时，可将该分类下的物品迁移到另一分类（?moveTo=<key>）
+    if (conf.table === 'item_categories') {
+      const row = getOne('item_categories', req.params.id)
+      const moveTo = String(req.query.moveTo || '')
+      if (row && moveTo) db.prepare('UPDATE items SET category = ? WHERE category = ?').run(moveTo, row.key)
+    }
     deleteRow(conf.table, req.params.id)
     res.json({ ok: true })
   })

@@ -16,6 +16,14 @@ export interface BudgetCategory {
   spent?: number
 }
 
+export interface ItemCategory {
+  id: number
+  key: string
+  name: string
+  icon: string
+  sort: number
+}
+
 export interface Expense {
   id: number
   category_id: number | null

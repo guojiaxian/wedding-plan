@@ -9,6 +9,12 @@ const SIDES = { groom: '男方', bride: '女方', common: '共同' } as const
 const GRPS = ['家人', '亲戚', '同事', '同学', '朋友', '其他']
 const RSVP = { pending: '待回复', yes: '确认出席', no: '婉拒' } as const
 
+// 桌位图约定桌号（与现场布置·座位排布一致）：左1-左10 / 右1-右10
+const tableIdOptions = [
+  ...Array.from({ length: 10 }, (_, i) => `左${i + 1}`),
+  ...Array.from({ length: 10 }, (_, i) => `右${i + 1}`)
+]
+
 const guests = ref<Guest[]>([])
 const loading = ref(true)
 const keyword = ref('')
@@ -187,7 +193,10 @@ function cycleRsvp(g: Guest) {
         </div>
         <div class="field">
           <label>桌号</label>
-          <input class="input" v-model="form.table_no" placeholder="如：6" />
+          <input class="input" v-model="form.table_no" list="table-no-options" placeholder="如：左1 / 右10" />
+          <datalist id="table-no-options">
+            <option v-for="t in tableIdOptions" :key="t" :value="t" />
+          </datalist>
         </div>
         <div class="field">
           <label>礼金（元，选填）</label>

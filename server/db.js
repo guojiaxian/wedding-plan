@@ -98,6 +98,14 @@ CREATE TABLE IF NOT EXISTS guests (
   note TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS item_categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  icon TEXT DEFAULT '📦',
+  sort INTEGER DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS decorations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   area TEXT DEFAULT 'ceremony',
@@ -139,7 +147,7 @@ export function deleteRow(table, id) {
   db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id)
 }
 export function clearData() {
-  const tables = ['budget_categories', 'expenses', 'items', 'tasks', 'timeline_events', 'staff', 'guests', 'decorations']
+  const tables = ['budget_categories', 'expenses', 'items', 'item_categories', 'tasks', 'timeline_events', 'staff', 'guests', 'decorations']
   for (const t of tables) db.prepare(`DELETE FROM ${t}`).run()
 }
 
@@ -181,6 +189,12 @@ export function seedTemplate() {
     ['婚礼策划布置', 12000], ['婚车车队', 3000], ['喜糖喜品', 3000], ['司仪摄像', 8000],
     ['蜜月旅行', 10000], ['备用金', 5000]
   ].forEach(([name, budget], i) => { catId[name] = Number(cat.run(name, budget, i).lastInsertRowid) })
+
+  const icat = db.prepare('INSERT INTO item_categories (key, name, icon, sort) VALUES (?,?,?,?)')
+  ;[
+    ['bride', '新娘', '👗'], ['groom', '新郎', '🤵'], ['ceremony', '仪式用品', '💍'],
+    ['favor', '喜品伴手礼', '🎁'], ['other', '其他', '📦']
+  ].forEach(([key, name, icon], i) => icat.run(key, name, icon, i))
 
   const it = db.prepare('INSERT INTO items (category, name, budget_category_id, estimated_price, actual_price, purchased, channel, note, sort) VALUES (?,?,?,?,?,?,?,?,?)')
   ;[
@@ -251,11 +265,11 @@ export function seedTemplate() {
 
   const gu = db.prepare('INSERT INTO guests (name, side, grp, relationship, phone, rsvp, count, table_no, gift, note) VALUES (?,?,?,?,?,?,?,?,?,?)')
   ;[
-    ['大伯一家', 'groom', '家人', '伯父', '138xxxx0001', 'yes', 4, '1', null, '需要接站'],
-    ['姑姑', 'groom', '家人', '姑姑', '138xxxx0002', 'yes', 3, '1', null, '对海鲜过敏'],
-    ['大学室友老王', 'groom', '同学', '室友', '138xxxx0003', 'yes', 1, '6', null, '可能带对象'],
-    ['表姨一家', 'bride', '亲戚', '表姨', '139xxxx0001', 'pending', 3, '2', null, ''],
-    ['闺蜜乐乐', 'bride', '朋友', '闺蜜', '139xxxx0002', 'yes', 1, '7', null, '兼伴娘'],
+    ['大伯一家', 'groom', '家人', '伯父', '138xxxx0001', 'yes', 4, '左1', null, '需要接站'],
+    ['姑姑', 'groom', '家人', '姑姑', '138xxxx0002', 'yes', 3, '左1', null, '对海鲜过敏'],
+    ['大学室友老王', 'groom', '同学', '室友', '138xxxx0003', 'yes', 1, '右1', null, '可能带对象'],
+    ['表姨一家', 'bride', '亲戚', '表姨', '139xxxx0001', 'pending', 3, '左2', null, ''],
+    ['闺蜜乐乐', 'bride', '朋友', '闺蜜', '139xxxx0002', 'yes', 1, '右2', null, '兼伴娘'],
     ['张阿姨一家', 'bride', '亲戚', '邻居', '139xxxx0003', 'no', 3, '', null, '回老家了，随礼']
   ].forEach(r => gu.run(...r))
 

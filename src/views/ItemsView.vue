@@ -1,40 +1,49 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { api, money, toast } from '../api/client'
-import type { BudgetCategory, Item } from '../api/types'
+import type { BudgetCategory, Item, ItemCategory } from '../api/types'
 import UiModal from '../components/UiModal.vue'
 import EmptyState from '../components/EmptyState.vue'
 
-const ITEM_CATS = [
-  { key: 'bride', label: '新娘', icon: '👗' },
-  { key: 'groom', label: '新郎', icon: '🤵' },
-  { key: 'ceremony', label: '仪式用品', icon: '💍' },
-  { key: 'favor', label: '喜品伴手礼', icon: '🎁' },
-  { key: 'other', label: '其他', icon: '📦' }
-]
-
 const items = ref<Item[]>([])
-const cats = ref<BudgetCategory[]>([])
+const cats = ref<ItemCategory[]>([])
+const budgetCats = ref<BudgetCategory[]>([])
 const filter = ref<'all' | 'no' | 'yes'>('all')
 const collapsed = ref<Record<string, boolean>>({})
 const loading = ref(true)
 
 async function load() {
   try {
-    const [it, c] = await Promise.all([api.get<Item[]>('/items'), api.get<BudgetCategory[]>('/budget-categories')])
-    items.value = it; cats.value = c
+    const [it, c, bc] = await Promise.all([
+      api.get<Item[]>('/items'),
+      api.get<ItemCategory[]>('/item-categories'),
+      api.get<BudgetCategory[]>('/budget-categories')
+    ])
+    items.value = it; cats.value = c; budgetCats.value = bc
   } catch (e: any) { toast(e.message, 'err') }
   loading.value = false
 }
 onMounted(load)
 
+// 分组：按分类表渲染（空分类也显示，便于看到新分类）；已删除分类的遗留物品归入「未分类」
+const grouped = computed(() => {
+  const groups = cats.value.map(c => ({
+    key: c.key,
+    name: c.name,
+    icon: c.icon,
+    cat: c,
+    list: filtered.value.filter(i => i.category === c.key)
+  }))
+  const keys = new Set(cats.value.map(c => c.key))
+  const orphans = filtered.value.filter(i => !keys.has(i.category))
+  if (orphans.length) groups.push({ key: '__orphan__', name: '未分类', icon: '📦', cat: null, list: orphans })
+  return groups
+})
+const activeCatCount = computed(() => grouped.value.length)
+
 const filtered = computed(() => items.value.filter(i =>
   filter.value === 'all' || (filter.value === 'yes' ? i.purchased : !i.purchased)
 ))
-const grouped = computed(() => ITEM_CATS.map(c => ({
-  ...c,
-  list: filtered.value.filter(i => i.category === c.key)
-})).filter(g => g.list.length))
 
 const stats = computed(() => ({
   total: items.value.length,
@@ -48,9 +57,9 @@ const catSpent = (key: string) => items.value
 const catTotal = (key: string) => items.value.filter(i => i.category === key).length
 const catDone = (key: string) => items.value.filter(i => i.category === key && i.purchased).length
 
-const catName = (id: number | null) => cats.value.find(c => c.id === id)?.name || ''
+const budgetCatName = (id: number | null) => budgetCats.value.find(c => c.id === id)?.name || ''
 
-// ===== 编辑 =====
+// ===== 物品编辑 =====
 const modal = ref(false)
 const form = reactive({
   id: 0, name: '', category: 'bride', budget_category_id: null as number | null,
@@ -103,13 +112,57 @@ async function remove(i: Item) {
     load()
   } catch (e: any) { toast(e.message, 'err') }
 }
+
+// ===== 分类管理（自定义分类） =====
+const catModal = ref(false)
+const catForm = reactive({ id: 0, name: '', icon: '📦' })
+
+function openCatNew() {
+  Object.assign(catForm, { id: 0, name: '', icon: '📦' })
+  catModal.value = true
+}
+function openCatEdit(c: ItemCategory) {
+  Object.assign(catForm, { id: c.id, name: c.name, icon: c.icon || '📦' })
+  catModal.value = true
+}
+async function saveCat() {
+  if (!catForm.name.trim()) return toast('请填写分类名称', 'err')
+  try {
+    if (catForm.id) {
+      await api.put(`/item-categories/${catForm.id}`, { name: catForm.name, icon: catForm.icon })
+    } else {
+      const maxSort = cats.value.reduce((s, c) => Math.max(s, c.sort), -1)
+      await api.post('/item-categories', { name: catForm.name, icon: catForm.icon, sort: maxSort + 1 })
+    }
+    catModal.value = false
+    toast('分类已保存 ✓')
+    load()
+  } catch (e: any) { toast(e.message, 'err') }
+}
+async function removeCat(c: ItemCategory) {
+  if (cats.value.length <= 1) return toast('至少保留一个分类', 'err')
+  const n = catTotal(c.key)
+  const fallback = cats.value.find(x => x.key !== c.key)!
+  const msg = n > 0
+    ? `分类「${c.name}」下有 ${n} 件物品，删除后将移入「${fallback.name}」，确定继续吗？`
+    : `删除空分类「${c.name}」？`
+  if (!confirm(msg)) return
+  try {
+    await api.del(`/item-categories/${c.id}${n > 0 ? `?moveTo=${fallback.key}` : ''}`)
+    toast('分类已删除')
+    load()
+  } catch (e: any) { toast(e.message, 'err') }
+}
 </script>
 
 <template>
   <div>
     <div class="page-head">
       <h2 class="page-title"><span class="ico">🛍️</span>物品清单</h2>
-      <button class="btn btn-primary" @click="openNew('bride')">＋ 添加物品</button>
+      <div class="page-actions">
+        <button class="btn" @click="openCatNew">＋ 分类</button>
+        <button class="btn btn-primary" @click="openNew(cats[0]?.key || 'other')">＋ 添加物品</button>
+      </div>
     </div>
 
     <div class="card stat-line">
@@ -117,6 +170,7 @@ async function remove(i: Item) {
       <span>已购 <b class="num pink">{{ stats.purchased }}</b> 件</span>
       <span>预计合计 <b class="num gold">¥{{ money(stats.estimated) }}</b></span>
       <span>实付合计 <b class="num gold">¥{{ money(stats.actual) }}</b></span>
+      <span class="muted">{{ cats.length }} 个分类</span>
     </div>
 
     <div class="chip-row mt16 mb16">
@@ -125,23 +179,30 @@ async function remove(i: Item) {
       <button class="chip" :class="{ active: filter === 'yes' }" @click="filter = 'yes'">已购置</button>
     </div>
 
-    <div v-if="!loading && !grouped.length">
+    <div v-if="!loading && !activeCatCount">
       <EmptyState emoji="🛒" text="这里还空空的，添加第一件备婚物品吧" />
     </div>
 
     <div v-for="g in grouped" :key="g.key" class="card group-card">
       <div class="group-head" @click="collapsed[g.key] = !collapsed[g.key]">
-        <span class="gi">{{ g.icon }} <b>{{ g.label }}</b></span>
+        <span class="gi">{{ g.icon }} <b>{{ g.name }}</b></span>
         <span class="muted gs">{{ catDone(g.key) }}/{{ catTotal(g.key) }} · 约 ¥{{ money(catSpent(g.key)) }}</span>
+        <span class="g-ops" v-if="g.cat" @click.stop>
+          <button class="btn btn-icon" title="编辑分类" @click="openCatEdit(g.cat)">✏️</button>
+          <button class="btn btn-icon btn-danger-ghost" title="删除分类" @click="removeCat(g.cat)">🗑️</button>
+        </span>
         <span class="arrow" :class="{ up: !collapsed[g.key] }">▾</span>
       </div>
       <div class="list" v-show="!collapsed[g.key]">
+        <div v-if="!g.list.length" class="muted" style="font-size: 12.5px; padding: 4px 2px 2px">
+          {{ filter === 'all' ? '该分类暂无物品' : '该分类下无符合筛选条件的物品' }}
+        </div>
         <div v-for="i in g.list" :key="i.id" class="row" :class="{ done: i.purchased }">
           <input type="checkbox" class="ck" :checked="!!i.purchased" @change="toggleBuy(i)" />
           <div class="grow">
             <div class="name">
               {{ i.name }}
-              <span v-if="catName(i.budget_category_id)" class="badge info" style="margin-left:6px">计入·{{ catName(i.budget_category_id) }}</span>
+              <span v-if="budgetCatName(i.budget_category_id)" class="badge info" style="margin-left:6px">计入·{{ budgetCatName(i.budget_category_id) }}</span>
             </div>
             <div class="sub">
               <span v-if="!i.purchased">预计 ¥{{ money(i.estimated_price) }}</span>
@@ -168,14 +229,14 @@ async function remove(i: Item) {
         <div class="field">
           <label>物品分类</label>
           <select class="select" v-model="form.category">
-            <option v-for="c in ITEM_CATS" :key="c.key" :value="c.key">{{ c.icon }} {{ c.label }}</option>
+            <option v-for="c in cats" :key="c.key" :value="c.key">{{ c.icon }} {{ c.name }}</option>
           </select>
         </div>
         <div class="field">
           <label>计入预算分类（选填）</label>
           <select class="select" v-model="form.budget_category_id">
             <option :value="null">不计入</option>
-            <option v-for="c in cats" :key="c.id" :value="c.id">{{ c.name }}</option>
+            <option v-for="c in budgetCats" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </div>
         <div class="field">
@@ -205,6 +266,24 @@ async function remove(i: Item) {
         <button class="btn btn-primary" @click="save">保存</button>
       </template>
     </UiModal>
+
+    <!-- 分类新增/编辑 -->
+    <UiModal :open="catModal" :title="catForm.id ? '编辑分类' : '新增分类'" @close="catModal = false">
+      <div class="form-grid">
+        <div class="field">
+          <label>分类名称</label>
+          <input class="input" v-model="catForm.name" placeholder="如：双方父母 / 伴郎伴娘" @keyup.enter="saveCat" />
+        </div>
+        <div class="field">
+          <label>图标（emoji）</label>
+          <input class="input" v-model="catForm.icon" placeholder="如：👨‍👩‍👧" maxlength="8" />
+        </div>
+      </div>
+      <template #footer>
+        <button class="btn" @click="catModal = false">取消</button>
+        <button class="btn btn-primary" @click="saveCat">保存</button>
+      </template>
+    </UiModal>
   </div>
 </template>
 
@@ -214,11 +293,13 @@ async function remove(i: Item) {
 .group-head { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; padding: 2px 0; }
 .group-head .gi { font-size: 15px; }
 .group-head .gs { font-size: 12.5px; flex: 1; text-align: right; }
+.g-ops { display: flex; gap: 4px; }
 .arrow { transition: transform .2s; color: var(--muted); }
 .arrow.up { transform: rotate(180deg); }
 .group-card .list { margin-top: 10px; }
 @media (max-width: 600px) {
   .row .price { font-size: 13px; }
   .row .sub { font-size: 11.5px; }
+  .group-head .gs { font-size: 11.5px; }
 }
 </style>
