@@ -103,7 +103,10 @@ const SANITIZERS = {
     if ('rsvp' in d && !['pending', 'yes', 'no'].includes(d.rsvp)) d.rsvp = 'pending'
     if ('side' in d && !['groom', 'bride', 'common'].includes(d.side)) d.side = 'common'
   },
-  expenses(d) { if ('amount' in d) d.amount = numGE0(d.amount) },
+  expenses(d) {
+    if ('amount' in d) d.amount = numGE0(d.amount)
+    if ('date' in d && d.date && !DATE_RE.test(d.date)) d.date = ''
+  },
   items(d) {
     if ('estimated_price' in d) d.estimated_price = numGE0(d.estimated_price)
     if ('actual_price' in d && d.actual_price !== null) d.actual_price = numGE0(d.actual_price)

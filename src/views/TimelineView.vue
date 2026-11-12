@@ -41,7 +41,8 @@ async function save() {
   if (!form.title.trim()) return toast('请填写环节名称', 'err')
   try {
     if (form.id) await api.put(`/timeline/${form.id}`, { ...form })
-    else await api.post('/timeline', { ...form, sort: events.value.length })
+    // 新环节排在末尾：取现有最大 sort + 1（用 length 会与历史 sort 重复/跳跃的环节撞车，导致上移失效）
+    else await api.post('/timeline', { ...form, sort: Math.max(0, ...events.value.map(e => e.sort ?? 0)) + 1 })
     modal.value = false
     toast('已保存 ✓')
     load()
@@ -58,13 +59,13 @@ async function remove(e: TimelineEvent) {
 
 async function move(e: TimelineEvent, dir: -1 | 1) {
   const idx = events.value.findIndex(x => x.id === e.id)
-  const other = events.value[idx + dir]
-  if (!other) return
+  if (idx < 0 || !events.value[idx + dir]) return
+  // 按展示顺序交换位置后，整体归一化 sort 为 0..n-1：
+  // 只交换两项 sort 时，若历史数据存在重复/跳跃（如相邻两项同为 11），交换后顺序不变，表现为按钮无效
+  const arr = [...events.value]
+  ;[arr[idx], arr[idx + dir]] = [arr[idx + dir], arr[idx]]
   try {
-    await Promise.all([
-      api.put(`/timeline/${e.id}`, { sort: other.sort }),
-      api.put(`/timeline/${other.id}`, { sort: e.sort })
-    ])
+    await Promise.all(arr.map((it, i) => it.sort === i ? null : api.put(`/timeline/${it.id}`, { sort: i })))
     load()
   } catch (err: any) { toast(err.message, 'err') }
 }

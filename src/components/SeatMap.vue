@@ -127,6 +127,9 @@ async function unseatGuest(g: Guest) {
 
     <!-- 桌位详情弹窗 -->
     <UiModal :open="!!activeTable" :title="`${activeTable} 桌 · ${seatSum(activeTable)}/${capacity} 人`" @close="activeTable = ''">
+      <div class="over-banner" v-if="activeTable && seatSum(activeTable) > capacity">
+        ⚠️ 已超员：本桌 {{ seatSum(activeTable) }} 人，超出容量 {{ seatSum(activeTable) - capacity }} 人，建议移出部分宾客或调换到空位较多的桌
+      </div>
       <div class="modal-sec" v-if="tableGuests.length">
         <h4>已入座（点击移出）</h4>
         <div class="list">
@@ -172,6 +175,12 @@ async function unseatGuest(g: Guest) {
 <style scoped>
 .stat-line { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; font-size: 13.5px; color: var(--secondary); }
 .warn-text { color: var(--warning); font-weight: 600; }
+.over-banner {
+  margin-bottom: 12px; padding: 9px 12px; border-radius: var(--radius);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  color: var(--danger); font-size: 13px; font-weight: 600; line-height: 1.5;
+}
 .cap { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .cap-select { width: 90px; padding: 5px 8px; }
 
