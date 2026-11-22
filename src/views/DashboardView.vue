@@ -144,7 +144,7 @@ async function finishTask(t: Task) {
         <div class="kv"><span>总预算</span><b class="num">¥{{ money(summary.budget.totalBudget) }}</b></div>
         <div class="kv"><span>已花费</span><b class="num pink">¥{{ money(summary.budget.totalSpent) }}</b></div>
         <div class="kv"><span>剩余</span><b class="num" :style="{ color: summary.budget.totalBudget - summary.budget.totalSpent >= 0 ? 'var(--success)' : 'var(--danger)' }">¥{{ money(summary.budget.totalBudget - summary.budget.totalSpent) }}</b></div>
-        <router-link to="/budget" class="badge mute mt8">查看预算明细 →</router-link>
+        <router-link to="/budget" class="badge mute mt8">查看花销明细 →</router-link>
       </div>
     </div>
   </div>

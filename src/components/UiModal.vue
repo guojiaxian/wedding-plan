@@ -6,7 +6,8 @@ const emit = defineEmits<{ close: [] }>()
 <template>
   <teleport to="body">
     <transition name="modal">
-      <div v-if="open" class="overlay" @click.self="emit('close')">
+      <!-- 点击遮罩空白不关闭，避免误触丢失已填内容；仅通过 ✕ / 取消按钮关闭 -->
+      <div v-if="open" class="overlay">
         <div class="panel">
           <div class="head">
             <h3>{{ title }}</h3>

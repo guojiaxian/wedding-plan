@@ -165,7 +165,7 @@ async function clearAll() {
     <div class="card mt16">
       <h3 class="section-title" style="margin-top:0">💕 关于</h3>
       <p class="muted" style="font-size: 13.5px; line-height: 1.9">
-        「备婚计划」— 新人的专属备婚工具：预算规划 · 物品清单 · 筹备任务 · 婚礼流程 · 现场布置 · 人员分工 · 宾客名单。<br />
+        「备婚计划」— 新人的专属备婚工具：花销规划 · 物品清单 · 筹备任务 · 婚礼流程 · 现场布置 · 人员分工 · 宾客名单。<br />
         祝有情人终成眷属，婚礼圆满顺利！🎈
       </p>
     </div>

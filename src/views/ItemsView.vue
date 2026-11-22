@@ -48,12 +48,12 @@ const filtered = computed(() => items.value.filter(i =>
 const stats = computed(() => ({
   total: items.value.length,
   purchased: items.value.filter(i => i.purchased).length,
-  estimated: items.value.reduce((s, i) => s + (i.estimated_price || 0), 0),
-  actual: items.value.filter(i => i.purchased).reduce((s, i) => s + (i.actual_price || 0), 0)
+  estimated: items.value.reduce((s, i) => s + (i.estimated_price || 0), 0)
 }))
-const catSpent = (key: string) => items.value
+// 分组小计只按预计价合计（支付金额在花销规划中体现）
+const catEstimated = (key: string) => items.value
   .filter(i => i.category === key)
-  .reduce((s, i) => s + (i.purchased ? (i.actual_price || 0) : (i.estimated_price || 0)), 0)
+  .reduce((s, i) => s + (i.estimated_price || 0), 0)
 const catTotal = (key: string) => items.value.filter(i => i.category === key).length
 const catDone = (key: string) => items.value.filter(i => i.category === key && i.purchased).length
 
@@ -85,7 +85,8 @@ async function save() {
     const body = {
       name: form.name, category: form.category, budget_category_id: form.budget_category_id,
       estimated_price: Number(form.estimated_price) || 0,
-      actual_price: form.purchased ? (Number(form.actual_price) || 0) : null,
+      // 支付金额只在花销规划维护：此处不填写实付，仅透传已有值（未购清空）
+      actual_price: form.purchased ? (form.actual_price ?? null) : null,
       purchased: form.purchased ? 1 : 0, channel: form.channel, note: form.note
     }
     if (form.id) await api.put(`/items/${form.id}`, body)
@@ -169,7 +170,6 @@ async function removeCat(c: ItemCategory) {
       <span>共 <b class="num">{{ stats.total }}</b> 件</span>
       <span>已购 <b class="num pink">{{ stats.purchased }}</b> 件</span>
       <span>预计合计 <b class="num gold">¥{{ money(stats.estimated) }}</b></span>
-      <span>实付合计 <b class="num gold">¥{{ money(stats.actual) }}</b></span>
       <span class="muted">{{ cats.length }} 个分类</span>
     </div>
 
@@ -186,7 +186,7 @@ async function removeCat(c: ItemCategory) {
     <div v-for="g in grouped" :key="g.key" class="card group-card">
       <div class="group-head" @click="collapsed[g.key] = !collapsed[g.key]">
         <span class="gi">{{ g.icon }} <b>{{ g.name }}</b></span>
-        <span class="muted gs">{{ catDone(g.key) }}/{{ catTotal(g.key) }} · 约 ¥{{ money(catSpent(g.key)) }}</span>
+        <span class="muted gs">{{ catDone(g.key) }}/{{ catTotal(g.key) }} · 约 ¥{{ money(catEstimated(g.key)) }}</span>
         <span class="g-ops" v-if="g.cat" @click.stop>
           <button class="btn btn-icon" title="编辑分类" @click="openCatEdit(g.cat)">✏️</button>
           <button class="btn btn-icon btn-danger-ghost" title="删除分类" @click="removeCat(g.cat)">🗑️</button>
@@ -205,14 +205,11 @@ async function removeCat(c: ItemCategory) {
               <span v-if="budgetCatName(i.budget_category_id)" class="badge info" style="margin-left:6px">计入·{{ budgetCatName(i.budget_category_id) }}</span>
             </div>
             <div class="sub">
-              <span v-if="!i.purchased">预计 ¥{{ money(i.estimated_price) }}</span>
-              <span v-else-if="i.actual_price != null">实付 ¥{{ money(i.actual_price) }}</span>
-              <span v-else>已购 · 实付未填（暂按预计 ¥{{ money(i.estimated_price) }}）</span>
+              <span>预计 ¥{{ money(i.estimated_price) }}</span>
               <span v-if="i.channel"> · {{ i.channel }}</span>
               <span v-if="i.note"> · {{ i.note }}</span>
             </div>
           </div>
-          <div class="price num">¥{{ money(i.purchased ? (i.actual_price ?? i.estimated_price) : i.estimated_price) }}</div>
           <div class="ops">
             <button class="btn btn-icon" @click="openEdit(i)">✏️</button>
             <button class="btn btn-icon btn-danger-ghost" @click="remove(i)">🗑️</button>
@@ -234,7 +231,7 @@ async function removeCat(c: ItemCategory) {
           </select>
         </div>
         <div class="field">
-          <label>计入预算分类（选填）</label>
+          <label>计入花销分类（选填）</label>
           <select class="select" v-model="form.budget_category_id">
             <option :value="null">不计入</option>
             <option v-for="c in budgetCats" :key="c.id" :value="c.id">{{ c.name }}</option>
@@ -243,10 +240,6 @@ async function removeCat(c: ItemCategory) {
         <div class="field">
           <label>预计价格（元）</label>
           <input class="input" type="number" min="0" step="0.01" v-model.number="form.estimated_price" />
-        </div>
-        <div class="field">
-          <label>实际价格（元，已购时计入预算）</label>
-          <input class="input" type="number" min="0" step="0.01" v-model.number="form.actual_price" :disabled="!form.purchased" />
         </div>
         <div class="field">
           <label>购买渠道</label>
@@ -299,7 +292,6 @@ async function removeCat(c: ItemCategory) {
 .arrow.up { transform: rotate(180deg); }
 .group-card .list { margin-top: 10px; }
 @media (max-width: 600px) {
-  .row .price { font-size: 13px; }
   .row .sub { font-size: 11.5px; }
   .group-head .gs { font-size: 11.5px; }
 }

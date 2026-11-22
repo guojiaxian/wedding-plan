@@ -5,7 +5,8 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import {
   db, listAll, getOne, pick, insertRow, updateRow, deleteRow,
-  clearData, seedTemplate, isEmpty, isSeeded, markSeeded, localDate, seedTimeline
+  clearData, seedTemplate, isEmpty, isSeeded, markSeeded, localDate, seedTimeline,
+  migrateDecorationAreas
 } from './db.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -81,14 +82,15 @@ setInterval(backupDB, 6 * 3600 * 1000).unref()
 // ---------- 资源字段白名单 ----------
 const SCHEMA = {
   'item-categories': { table: 'item_categories', fields: ['key', 'name', 'icon', 'sort'], order: 'sort, id' },
-  'budget-categories': { table: 'budget_categories', fields: ['name', 'budget', 'sort'], order: 'sort, id' },
+  'budget-categories': { table: 'budget_categories', fields: ['name', 'budget', 'paid', 'sort'], order: 'sort, id' },
   expenses: { table: 'expenses', fields: ['category_id', 'name', 'amount', 'date', 'note'], order: 'date DESC, id DESC' },
   items: { table: 'items', fields: ['category', 'name', 'budget_category_id', 'estimated_price', 'actual_price', 'purchased', 'channel', 'note', 'sort'], order: 'sort, id' },
   tasks: { table: 'tasks', fields: ['title', 'phase', 'due_date', 'status', 'assignee', 'note', 'sort'], order: 'sort, id' },
   timeline: { table: 'timeline_events', fields: ['time', 'title', 'duration', 'location', 'owner', 'note', 'sort'], order: 'sort, id' },
   staff: { table: 'staff', fields: ['name', 'role', 'phone', 'duty', 'event_title'], order: 'id' },
   guests: { table: 'guests', fields: ['name', 'side', 'grp', 'relationship', 'phone', 'rsvp', 'count', 'table_no', 'gift', 'note'], order: 'id' },
-  decorations: { table: 'decorations', fields: ['area', 'name', 'done', 'source', 'note', 'sort'], order: 'sort, id' }
+  decorations: { table: 'decorations', fields: ['area', 'name', 'done', 'source', 'note', 'sort'], order: 'sort, id' },
+  'decoration-images': { table: 'decoration_images', fields: ['decoration_id', 'name', 'thumb', 'data'], order: 'id' }
 }
 
 const api = express.Router()
@@ -112,7 +114,10 @@ const SANITIZERS = {
     if ('actual_price' in d && d.actual_price !== null) d.actual_price = numGE0(d.actual_price)
     if ('purchased' in d) d.purchased = d.purchased ? 1 : 0
   },
-  budget_categories(d) { if ('budget' in d) d.budget = numGE0(d.budget) },
+  budget_categories(d) {
+    if ('budget' in d) d.budget = numGE0(d.budget)
+    if ('paid' in d) d.paid = numGE0(d.paid)
+  },
   item_categories(d) { if ('name' in d && !String(d.name).trim()) d.name = '未命名分类' },
   tasks(d) {
     if ('status' in d && !['todo', 'doing', 'done'].includes(d.status)) d.status = 'todo'
@@ -120,6 +125,11 @@ const SANITIZERS = {
     if ('due_date' in d && d.due_date && !DATE_RE.test(d.due_date)) d.due_date = ''
   },
   decorations(d) { if ('done' in d) d.done = d.done ? 1 : 0 },
+  decoration_images(d) {
+    // 只接受 data URL 形式的图片；文件名限长，防止异常写入
+    for (const k of ['thumb', 'data']) if (k in d && d[k] && !String(d[k]).startsWith('data:image/')) d[k] = ''
+    if ('name' in d) d.name = String(d.name ?? '').slice(0, 200)
+  },
   settings(d) {
     if ('total_budget' in d) d.total_budget = numGE0(d.total_budget)
     if ('wedding_date' in d && d.wedding_date && !DATE_RE.test(d.wedding_date)) d.wedding_date = ''
@@ -132,6 +142,26 @@ function sanitize(table, data) {
   return data
 }
 
+// ---------- 现场布置参考图（自定义路由，优先于下方通用 CRUD 注册） ----------
+// 布置清单附带每项的参考图缩略图（不含原图 data，保持列表轻量；原图按 id 懒加载）
+api.get('/decorations', (_req, res) => {
+  const rows = listAll('decorations', SCHEMA.decorations.order)
+  const imgs = db.prepare('SELECT id, decoration_id, name, thumb FROM decoration_images ORDER BY id').all()
+  const byDeco = new Map()
+  for (const im of imgs) {
+    if (!byDeco.has(im.decoration_id)) byDeco.set(im.decoration_id, [])
+    byDeco.get(im.decoration_id).push({ id: im.id, name: im.name, thumb: im.thumb })
+  }
+  res.json(rows.map(r => ({ ...r, images: byDeco.get(r.id) || [] })))
+})
+
+// 单张原图（点开大图时懒加载）
+api.get('/decoration-images/:id', (req, res) => {
+  const row = getOne('decoration_images', req.params.id)
+  if (!row) return res.status(404).json({ error: '图片不存在' })
+  res.json(row)
+})
+
 // 通用 CRUD
 for (const [route, conf] of Object.entries(SCHEMA)) {
   api.get(`/${route}`, (_req, res) => res.json(listAll(conf.table, conf.order)))
@@ -142,6 +172,12 @@ for (const [route, conf] of Object.entries(SCHEMA)) {
       // 物品自定义分类：未提供 key 时自动生成唯一 key
       if (conf.table === 'item_categories' && !data.key) {
         data.key = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      }
+      // 参考图必须挂在已存在的布置项上，且带有效图片数据
+      if (conf.table === 'decoration_images') {
+        data.decoration_id = Number(data.decoration_id) || 0
+        if (!getOne('decorations', data.decoration_id)) return res.status(400).json({ error: '布置项不存在' })
+        if (!data.data) return res.status(400).json({ error: '图片数据为空' })
       }
       res.json(insertRow(conf.table, conf.fields, data))
     } catch (e) { res.status(400).json({ error: e.message }) }
@@ -162,6 +198,10 @@ for (const [route, conf] of Object.entries(SCHEMA)) {
       const moveTo = String(req.query.moveTo || '')
       if (row && moveTo) db.prepare('UPDATE items SET category = ? WHERE category = ?').run(moveTo, row.key)
     }
+    // 删除布置项时级联清理其参考图
+    if (conf.table === 'decorations') {
+      db.prepare('DELETE FROM decoration_images WHERE decoration_id = ?').run(req.params.id)
+    }
     deleteRow(conf.table, req.params.id)
     res.json({ ok: true })
   })
@@ -181,17 +221,20 @@ api.get('/summary', (_req, res) => {
   const expenses = listAll('expenses', 'id DESC')
   const items = listAll('items')
 
+  // 已付口径：花销项「已付」累计 + 已购物品自动计入（仅限挂在现存花销分类上的物品）
+  // 分类被删后物品不再计入任何花销；expenses 表仅余未分类记录（一并计入总数）
+  const catIds = new Set(cats.map(c => c.id))
   const catSpent = {}
-  for (const c of cats) catSpent[c.id] = 0
-  for (const e of expenses) if (e.category_id in catSpent) catSpent[e.category_id] += e.amount || 0
+  for (const c of cats) catSpent[c.id] = Number(c.paid) || 0
   for (const it of items) {
-    if (it.purchased && it.budget_category_id in catSpent) {
+    if (it.purchased && catIds.has(it.budget_category_id)) {
       catSpent[it.budget_category_id] += it.actual_price ?? it.estimated_price ?? 0
     }
   }
 
-  const totalSpent = expenses.reduce((s, e) => s + (e.amount || 0), 0)
-    + items.filter(i => i.purchased).reduce((s, i) => s + (i.actual_price ?? i.estimated_price ?? 0), 0)
+  const totalSpent = cats.reduce((s, c) => s + (Number(c.paid) || 0), 0)
+    + items.filter(i => i.purchased && catIds.has(i.budget_category_id)).reduce((s, i) => s + (i.actual_price ?? i.estimated_price ?? 0), 0)
+    + expenses.filter(e => e.category_id == null).reduce((s, e) => s + (e.amount || 0), 0)
 
   const tasks = listAll('tasks')
   const guests = listAll('guests', 'id')
@@ -254,15 +297,30 @@ api.post('/backup', (req, res) => {
     if (s) db.prepare('UPDATE settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE id=1')
       .run(s.groom_name || '', s.bride_name || '', s.wedding_date || '', s.venue || '', numGE0(s.total_budget))
     // 兼容旧版备份：缺少的表按空数组处理
+    const decoIdMap = {} // 参考图重映射：备份里的布置项 id → 恢复后的新 id
     for (const [route, conf] of Object.entries(SCHEMA)) {
       const rows = Array.isArray(data[conf.table]) ? data[conf.table] : []
       for (const row of rows) {
         const clean = sanitize(conf.table, pick(row, conf.fields))
         if (conf.table === 'item_categories' && !clean.key) clean.key = 'r' + Math.random().toString(36).slice(2, 10)
-        insertRow(conf.table, conf.fields, clean)
+        // 参考图：指向恢复后的布置项；找不到对应布置项则丢弃该图
+        if (conf.table === 'decoration_images') {
+          clean.decoration_id = decoIdMap[clean.decoration_id] || 0
+          if (!clean.decoration_id) continue
+        }
+        const inserted = insertRow(conf.table, conf.fields, clean)
+        if (conf.table === 'decorations') decoIdMap[row.id] = inserted.id
       }
     }
+    // 旧版备份把付款逐笔存在 expenses：折算进对应花销项「已付」后清除（新版备份已含 paid，折算为零增量）
+    db.exec(`
+      UPDATE budget_categories SET paid = paid + (
+        SELECT COALESCE(SUM(e.amount), 0) FROM expenses e WHERE e.category_id = budget_categories.id
+      );
+      DELETE FROM expenses WHERE category_id IS NOT NULL;
+    `)
     db.exec('COMMIT')
+    migrateDecorationAreas() // 旧版备份可能仍是旧区域键（photo/ceremony），恢复后归一到新四区
     res.json({ ok: true })
   } catch (e) {
     db.exec('ROLLBACK')
@@ -313,6 +371,8 @@ if (!isSeeded()) {
     markSeeded()
   }
 }
+// 现场布置区域归一（旧五区 → 新四区），幂等：仅在存在旧区域键时执行
+migrateDecorationAreas()
 const server = app.listen(PORT, HOST, () => {
   console.log(`备婚计划服务已启动（监听 ${HOST}:${PORT}，数据独立存放于 server/data/）`)
   console.log(`  本机访问: http://localhost:${PORT}`)

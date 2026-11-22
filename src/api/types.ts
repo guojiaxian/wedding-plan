@@ -12,8 +12,9 @@ export interface BudgetCategory {
   id: number
   name: string
   budget: number
+  paid: number              // 已付累计（定金/全款手动更新）
   sort: number
-  spent?: number
+  spent?: number            // 已付合计 = paid + 已购物品自动计入
 }
 
 export interface ItemCategory {
@@ -91,14 +92,22 @@ export interface Guest {
   note: string
 }
 
+export interface DecorationImage {
+  id: number
+  decoration_id: number
+  name: string
+  thumb: string
+}
+
 export interface Decoration {
   id: number
-  area: string              // sign/ceremony/banquet/photo/home
+  area: string              // welcome/sign/banquet/home（旧数据 photo/ceremony 已由启动迁移归一）
   name: string
   done: number
   source: string
   note: string
   sort: number
+  images?: DecorationImage[]  // 参考图（列表仅含缩略图，原图按需懒加载）
 }
 
 export interface Summary {

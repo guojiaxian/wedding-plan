@@ -119,7 +119,36 @@ CREATE TABLE IF NOT EXISTS decorations (
   note TEXT DEFAULT '',
   sort INTEGER DEFAULT 0
 );
+
+-- 现场布置参考图：图片以 data URL 存于库内（随备份一起导出），原图 data + 列表用小缩略图 thumb
+CREATE TABLE IF NOT EXISTS decoration_images (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  decoration_id INTEGER,
+  name TEXT DEFAULT '',
+  thumb TEXT DEFAULT '',
+  data TEXT DEFAULT ''
+);
 `)
+
+// ---------- 迁移：花销项直接维护「已付」累计（付款不再逐笔记录/展示） ----------
+// 老库缺 paid 列时补列，并把既有按分类记录的支出折算进 paid 后移除（未分类支出保留原样）
+try {
+  const bcCols = db.prepare('PRAGMA table_info(budget_categories)').all().map(c => c.name)
+  if (!bcCols.includes('paid')) {
+    db.exec(`
+      BEGIN;
+      ALTER TABLE budget_categories ADD COLUMN paid REAL DEFAULT 0 NOT NULL;
+      UPDATE budget_categories SET paid = (
+        SELECT COALESCE(SUM(e.amount), 0) FROM expenses e WHERE e.category_id = budget_categories.id
+      );
+      DELETE FROM expenses WHERE category_id IS NOT NULL;
+      COMMIT;
+    `)
+  }
+} catch (e) {
+  try { db.exec('ROLLBACK') } catch { /* 无进行中事务 */ }
+  throw e
+}
 
 // ---------- 通用 CRUD 辅助（表名/字段均为白名单，参数化查询） ----------
 export function listAll(table, orderBy = 'sort, id') {
@@ -151,7 +180,7 @@ export function deleteRow(table, id) {
   db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id)
 }
 export function clearData() {
-  const tables = ['budget_categories', 'expenses', 'items', 'item_categories', 'tasks', 'timeline_events', 'staff', 'guests', 'decorations']
+  const tables = ['budget_categories', 'expenses', 'items', 'item_categories', 'tasks', 'timeline_events', 'staff', 'guests', 'decorations', 'decoration_images']
   for (const t of tables) db.prepare(`DELETE FROM ${t}`).run()
 }
 
@@ -283,28 +312,47 @@ export function seedTemplate() {
 
   const de = db.prepare('INSERT INTO decorations (area, name, done, source, note, sort) VALUES (?,?,?,?,?,?)')
   ;[
+    ['welcome', '迎宾牌 / 照片展示架', 0, '婚庆', '用旅拍照片', 0],
+    ['welcome', '拍照背景板', 0, '租赁', '', 1],
+    ['welcome', '拍照道具（相框/灯牌）', 0, '自制', '', 2],
+    ['welcome', '气球布置', 0, '自制', '', 3],
+    ['welcome', '花门 / 拱门', 0, '婚庆', '', 4],
     ['sign', '签到台 + 桌布花艺', 0, '婚庆', '', 0],
-    ['sign', '迎宾牌 / 照片展示架', 0, '婚庆', '用旅拍照片', 1],
-    ['sign', '签到本 + 签名笔', 0, '自制', '', 2],
-    ['sign', '伴手礼摆放区', 0, '自制', '', 3],
-    ['ceremony', '主背景 + 花艺', 0, '婚庆', '', 0],
-    ['ceremony', '花门 / 拱门', 0, '婚庆', '', 1],
-    ['ceremony', '红毯 + 路引', 0, '婚庆', '', 2],
-    ['ceremony', '音响 / 无线麦克风 ×2', 0, '婚庆', '仪式前试音', 3],
-    ['banquet', '桌花', 0, '婚庆', '', 0],
-    ['banquet', '椅背纱 / 椅背花', 0, '婚庆', '', 1],
-    ['banquet', '大屏背景 + 婚前视频', 0, '婚庆', '视频需提前一周剪辑', 2],
-    ['banquet', '舞台灯光', 0, '婚庆', '', 3],
-    ['banquet', '烟酒糖摆台', 0, '自制', '每桌按标准摆放', 4],
-    ['photo', '拍照背景板', 0, '租赁', '', 0],
-    ['photo', '拍照道具（相框/灯牌）', 0, '自制', '', 1],
-    ['photo', '气球布置', 0, '自制', '', 2],
+    ['sign', '签到本 + 签名笔', 0, '自制', '', 1],
+    ['sign', '伴手礼摆放区', 0, '自制', '', 2],
+    ['banquet', '主背景 + 花艺', 0, '婚庆', '', 0],
+    ['banquet', '红毯 + 路引', 0, '婚庆', '', 1],
+    ['banquet', '音响 / 无线麦克风 ×2', 0, '婚庆', '仪式前试音', 2],
+    ['banquet', '桌花', 0, '婚庆', '', 3],
+    ['banquet', '椅背纱 / 椅背花', 0, '婚庆', '', 4],
+    ['banquet', '大屏背景 + 婚前视频', 0, '婚庆', '视频需提前一周剪辑', 5],
+    ['banquet', '舞台灯光', 0, '婚庆', '', 6],
+    ['banquet', '烟酒糖摆台', 0, '自制', '每桌按标准摆放', 7],
     ['home', '婚房气球 + 喜字', 0, '自制', '婚前一晚布置', 0],
     ['home', '红色床品四件套', 0, '自制', '', 1],
     ['home', '压床娃娃', 0, '自制', '', 2]
   ].forEach(r => de.run(...r))
 
   markSeeded()
+}
+
+// ---------- 现场布置区域迁移：旧五区（签到/仪式/宴会/拍照/婚房）→ 新四区（迎宾/签到/宴会/婚房） ----------
+// 仅当仍存在旧区域键（photo/ceremony）时执行；全部迁移完成后不再触发，幂等可重复调用。
+// 映射：拍照区→迎宾区；仪式区→宴会厅（花门/拱门属迎宾动线→迎宾区）；签到区内迎宾类→迎宾区。
+export function migrateDecorationAreas() {
+  const old = db.prepare("SELECT COUNT(*) AS n FROM decorations WHERE area IN ('photo', 'ceremony')").get()
+  if (!Number(old.n)) return
+  db.prepare("UPDATE decorations SET area = 'welcome' WHERE area = 'photo'").run()
+  db.prepare("UPDATE decorations SET area = 'welcome' WHERE area = 'ceremony' AND (name LIKE '%花门%' OR name LIKE '%拱门%')").run()
+  db.prepare("UPDATE decorations SET area = 'banquet' WHERE area = 'ceremony'").run()
+  db.prepare("UPDATE decorations SET area = 'welcome' WHERE area = 'sign' AND name LIKE '%迎宾%'").run()
+  // 迎宾区条目来自三个旧区域，sort 打散了：按常见动线归一（迎宾牌 → 拍照背景板 → 拍照道具 → 气球 → 花门），其余按 id
+  const pri = (name) => /迎宾/.test(name) ? 0 : /拍照背景/.test(name) ? 1 : /拍照道具|相框|灯牌/.test(name) ? 2 : /气球/.test(name) ? 3 : /花门|拱门/.test(name) ? 4 : 5
+  const rows = db.prepare("SELECT id, name FROM decorations WHERE area = 'welcome' ORDER BY id").all()
+    .sort((a, b) => pri(a.name) - pri(b.name) || a.id - b.id)
+  const upd = db.prepare('UPDATE decorations SET sort = ? WHERE id = ?')
+  rows.forEach((r, i) => upd.run(i, r.id))
+  console.log('现场布置区域已迁移：拍照区/花门/迎宾类 → 迎宾区，仪式区其余 → 宴会厅')
 }
 
 export function isEmpty() {
