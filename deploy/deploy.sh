@@ -3,12 +3,14 @@
 # 备婚计划 · 一键部署脚本（生产机专用；本脚本为本项目独立编写，
 # 未参考/复用 StudyLog 的 deploy 脚本，服务名/端口/目录/单元名均不同）
 #
-# 约束来源：《新服务环境准备要求.md》
-#   - 自包含：代码/依赖/数据/日志/备份全部在本仓库目录内
+# 约束来源：《新服务环境准备要求.md》，并按项目负责人最新要求调整：
+#   - 生产目录：/root/applications/wedding-plan（自包含：代码/依赖/数据/日志/备份均在其内）
+#   - 生产端口：80（以 .env 为准；开发机端口保持 19002）
+#   - 生产机只读：只允许 git pull，禁止本地修改/提交/推送
 #   - 不触碰 /root/studylog 及其任何文件（仅做只读健康探测用于零干扰证明）
 #   - 不改系统 Node / 不 npm i -g / 不装常驻数据库 / 不改系统配置
 #   - systemd 新增单元 wedding-plan.service（MemoryMax=400M）
-#   - 端口 19002；SQLite 单文件（node:sqlite WAL），位于 server/data/
+#   - SQLite 单文件（node:sqlite WAL），位于 server/data/
 #
 # 用法：
 #   ./deploy/deploy.sh             # 完整部署：拉代码 → 构建 → 重启服务 → 自检
@@ -18,7 +20,10 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="wedding-plan"
-PORT="${PORT:-19002}"
+ENV_FILE="$APP_DIR/.env"
+# 端口优先级：环境变量 PORT > 已有 .env 中的 PORT > 默认 80（生产）
+PORT_FROM_ENV="$(sed -n 's/^[[:space:]]*PORT[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" 2>/dev/null | tail -1 | tr -d "\"' " || true)"
+PORT="${PORT:-${PORT_FROM_ENV:-80}}"
 NODE_BIN="/usr/bin/node"
 STUDYLOG_HEALTH="http://127.0.0.1:3000/api/v1/health"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -70,9 +75,16 @@ say "内存 available: ${AVAIL_MB}MB"
 NODE_BEFORE="$("$NODE_BIN" -v)"
 say "Node 版本: ${NODE_BEFORE}（共用系统 Node，部署前后必须一致）"
 
-# ---------- 2. 拉取代码 ----------
-say "[2/7] 同步代码"
+# ---------- 2. 拉取代码（生产机只读：只 pull，不改不推） ----------
+say "[2/7] 同步代码（只读：git pull --ff-only）"
 if [ -d .git ]; then
+  if [ -n "$(git status --porcelain)" ]; then
+    die "检测到生产机工作区有本地改动：生产机只允许 pull，请先把代码恢复干净（git restore .）再部署"
+  fi
+  PUSH_URL="$(git remote get-url --push origin 2>/dev/null || true)"
+  if [ -n "$PUSH_URL" ] && [ "$PUSH_URL" != "DISABLED" ]; then
+    warn "生产机 push 地址仍为 ${PUSH_URL}；建议执行 git remote set-url --push origin DISABLED 锁定只读"
+  fi
   git pull --ff-only origin "${BRANCH:-main}"
 else
   warn "当前目录不是 git 仓库，跳过拉取，使用现有代码"
@@ -96,8 +108,8 @@ fi
 # ---------- 5. 生成 .env（自包含，不入 git） ----------
 say "[5/7] 环境配置"
 if [ ! -f .env ]; then
-  cp deploy/env.example .env
-  say "已从 deploy/env.example 生成 .env（TZ=Asia/Shanghai, PORT=${PORT}）"
+  sed "s/^PORT=.*/PORT=${PORT}/" deploy/env.example > .env
+  say "已按 deploy/env.example 生成 .env（TZ=Asia/Shanghai, PORT=${PORT}）"
 else
   say ".env 已存在，保持不变（数据库与配置不随代码更新而丢失）"
 fi
@@ -142,4 +154,4 @@ say "Node 版本核对: 部署前 ${NODE_BEFORE} / 部署后 $("$NODE_BIN" -v)"
 echo ""
 say "✅ 部署完成：http://127.0.0.1:${PORT} （局域网/公网访问需服务器 IP + 阿里云安全组放行 ${PORT}/TCP，由负责人操作）"
 say "   数据库: ${APP_DIR}/server/data/（不入 git，与开发环境物理隔离）"
-say "   日志:   ${APP_DIR}/logs/（按天轮转，保留 14 天）；每日备份: ${APP_DIR}/backups/（保留 30 份）"
+say "   日志:   ${APP_DIR}/server/logs/（按天轮转，保留 14 天）；每日备份: ${APP_DIR}/server/backups/（保留 30 份）"

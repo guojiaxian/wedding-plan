@@ -20,6 +20,8 @@ function loadDotEnv(file) {
     process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '')
   }
 }
+// 项目根 .env 优先（生产 PORT=80 / 开发 PORT=19002）；兼容旧的 server/.env
+loadDotEnv(path.join(__dirname, '..', '.env'))
 loadDotEnv(path.join(__dirname, '.env'))
 
 // ---------- 文件日志：logs/ 按天轮转，保留 14 天（自包含，不依赖系统 logrotate） ----------
@@ -347,7 +349,7 @@ if (fs.existsSync(distDir)) {
   app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(path.join(distDir, 'index.html')))
 }
 
-// 默认使用本项目的专用端口 19002（已确认与同机其他服务不冲突），监听 0.0.0.0 以便局域网访问；
+// 默认使用开发端口 19002；生产机由根目录 .env / systemd EnvironmentFile 注入 PORT=80
 // 需要更换时：PORT=xxxx node server/index.js
 const PORT = Number(process.env.PORT) || 19002
 const HOST = process.env.HOST || '0.0.0.0'

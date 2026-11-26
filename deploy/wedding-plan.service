@@ -1,5 +1,5 @@
 [Unit]
-Description=Wedding Plan web service (Vue3 + Express + SQLite, port 19002)
+Description=Wedding Plan web service (Vue3 + Express + SQLite, port from .env)
 After=network.target
 
 [Service]

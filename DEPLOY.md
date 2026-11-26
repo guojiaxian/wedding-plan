@@ -1,32 +1,37 @@
 # 🚀 线上部署手册（阿里云生产机）
 
 > 适用环境：阿里云 ECS 2C2G / 40GB，已运行 StudyLog（3000 端口）。
-> 全部操作遵守《[新服务环境准备要求.md](./新服务环境准备要求.md)》红线。
-> **分工：开发机（当前服务器）只写代码；生产机只跑 `deploy/deploy.sh`，不改代码。**
+> **生产目录：`/root/applications/wedding-plan`　生产端口：`80`（直接 `http://<服务器IP>/`）**
+> 本版按项目负责人最新要求调整：生产端口 80、目录 `/root/applications/wedding-plan`；开发机端口保持 19002。
+> **分工：开发机只写代码并 push；生产机只 `git pull`，禁止改代码、提交和 push。**
 
-## 一、架构与隔离总览
+## 一、两台机器与隔离总览
 
-| 项 | 开发机（当前服务器） | 生产机（阿里云） |
+| 项 | 开发机（当前写代码的机器） | 生产机（阿里云） |
 |---|---|---|
-| 角色 | 日常开发、测试 | 7×24 运行，只部署不开发 |
-| 目录 | 任意（如 `/root/wedding-plan`） | **`/root/wedding-plan`**（自包含） |
-| 数据库 | `server/data/wedding.db`（本机私有） | `server/data/wedding.db`（**git 忽略，与线下物理隔离**） |
-| 端口 | 19002（开发实例） | **19002**（systemd `wedding-plan.service`） |
-| 数据同步 | 如需迁移：设置页「导出备份」→ 生产机设置页「导入备份」 | 每日自动备份 `backups/`（保留 30 份） |
+| 角色 | 日常开发、测试 | 7×24 对外运行，只部署不开发 |
+| 目录 | `/root/applications/wedding-plan` | **`/root/applications/wedding-plan`**（自包含） |
+| 端口 | **19002**（保持不变） | **80**（`http://<公网IP>/`） |
+| 代码权限 | 可 commit / push | **只读：只允许 pull** |
+| 数据库 | `server/data/wedding.db`（本机私有） | `server/data/wedding.db`（git 忽略，独立文件） |
+| 鉴权 | 无 | **无（按要求不启用登录鉴权）** |
+| 数据同步 | 首次上线时从开发机导入一次；之后两边各自独立 | 导入后与开发机物理隔离，互不影响 |
 
-红线对照：不碰 `/root/studylog`（部署脚本仅对其做只读健康探测）✓ · 共用系统 Node（无原生模块，无需编译）✓ · 端口 19002（文档指定）✓ · systemd 新单元含 `MemoryMax=400M` ✓ · 纯 JS 依赖（express 1 个运行时依赖）✓ · 日志按天轮转保留 14 天 ✓ · 备份保留 30 份 ✓
+隔离保证：`server/data/`、`server/logs/`、`server/backups/`、`.env` 均在 `.gitignore` 中。
+`git pull` 永远不会覆盖生产数据库；开发机的数据也不会被带到生产机。
 
-## 二、首次部署（生产机，约 5 分钟）
+## 二、首次部署（生产机，root 执行）
 
 ### 前置（由服务器负责人操作）
 
-1. 阿里云安全组放行 **19002/TCP**（文档 3.4：安全组由负责人修改）。
-2. 生产机可访问 GitHub；建议为本仓库添加 **只读 Deploy Key**：
+1. 阿里云安全组放行 **80/TCP**（公网访问必需）。
+2. 生产机可访问 GitHub，并为本仓库添加 **只读 Deploy Key**：
 
 ```bash
-# 生产机上生成密钥并把公钥添加到 GitHub 仓库 → Settings → Deploy keys（勾选只读）
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_github -N ""
 cat ~/.ssh/id_ed25519_github.pub
+# 把公钥添加到 GitHub 仓库 → Settings → Deploy keys（不要勾选 Allow write access）
+
 cat >> ~/.ssh/config <<'EOF'
 Host github.com
   IdentityFile ~/.ssh/id_ed25519_github
@@ -34,69 +39,196 @@ Host github.com
 EOF
 ```
 
-### 部署步骤（生产机 root 执行）
+### 1. 登录生产机，先核实环境
 
 ```bash
-# 1. 克隆（目录自包含，与 /root/studylog 平级互不嵌套）
-git clone git@github.com:guojiaxian/wedding-plan.git /root/wedding-plan
-cd /root/wedding-plan
+ss -tlnp                  # 确认 80 端口空闲；3000 为 StudyLog；22 为 SSH
+systemctl status studylog --no-pager   # StudyLog 必须正常运行，部署全程不动它
+free -m                   # available 建议 ≥ 1GB
+node -v                   # 必须 ≥ 22.5（使用内置 node:sqlite）
+```
 
-# 2. 一键部署（自动完成：预检 → 拉代码 → npm ci → 构建 → 清理 devDeps → 装服务 → 重启 → 自检）
+> ⚠️ 如果 80 已被其他进程占用（例如 nginx），**不要杀进程、不要改 nginx**，先停下联系服务器负责人。
+> 本服务直接监听 80；生产机上不应再让其他程序占用 80。
+
+### 2. 克隆代码到生产目录
+
+```bash
+git clone git@github.com:guojiaxian/wedding-plan.git /root/applications/wedding-plan
+cd /root/applications/wedding-plan
+```
+
+### 3. 把仓库设为“只读”（禁止生产机推送）
+
+```bash
+# 让 push 直接失败；pull 不受影响
+git remote set-url --push origin DISABLED
+git remote -v            # fetch 为 GitHub 地址，push 显示 DISABLED 即正确
+```
+
+`deploy.sh` 还会在拉代码前检查工作区：只要生产机有未提交的本地改动，脚本会直接终止，避免“线上偷偷改代码”。
+
+### 4. 一键部署
+
+```bash
 ./deploy/deploy.sh
+```
 
-# 首次也可先演练，不动服务：
+脚本会自动完成：预检（端口 / StudyLog / 内存 / Node）→ `git pull --ff-only` → `npm ci` → 构建前端 → 生成 `.env`（`PORT=80`、`TZ=Asia/Shanghai`）→ 安装并重启 systemd 单元 `wedding-plan` → 健康检查与 StudyLog 零干扰验证。
+
+首次也可只演练、不动服务：
+
+```bash
 ./deploy/deploy.sh --dry-run
 ```
 
-脚本会自动：生成 `.env`（TZ=Asia/Shanghai / PORT=19002）、安装 systemd 单元
-`wedding-plan.service`（`MemoryMax=400M`）、重启服务、执行文档第 8 节全部自检
-（含 **StudyLog 零干扰证明**——若 StudyLog 健康检查失败，脚本会提示立即回滚）。
-
-## 三、日常更新（开发 → 上线）
+### 5. 验收
 
 ```bash
-# 开发机：改代码 → 提交推送
-git add -A && git commit -m "feat: xxx" && git push origin main
+curl -s http://127.0.0.1/health
+# {"status":"ok","app":"wedding-plan",...}
 
-# 生产机：一键更新（数据库/日志/备份/ .env 均不受影响）
-cd /root/wedding-plan && ./deploy/deploy.sh
+curl -s http://127.0.0.1:3000/api/v1/health
+# StudyLog 仍正常
+
+systemctl status wedding-plan --no-pager
 ```
 
-## 四、部署自检清单（对应文档第 8 节）
+浏览器打开 `http://<生产机公网IP>/` 应能看到备婚首页（首次启动会带一套模板数据，下一步会替换成你的真实数据）。
 
-- [x] `ss -tlnp`：19002 空闲或为本服务占用（脚本自动检查，被他人占用即终止）
-- [x] StudyLog 在跑且未被动过（脚本自动检查并做部署后回归）
-- [x] `free -m` available ≥ 1GB（不足即终止）
-- [x] 无 `npm i -g`、系统 Node 版本部署前后一致（脚本自动核对输出）
-- [x] 无常驻数据库/中间件（SQLite 单文件 WAL）
-- [x] systemd 单元含 `MemoryMax=400M`，单元名/描述无 "studylog" 字样
-- [x] `.env` 独立，`TZ=Asia/Shanghai`，端口 19002
-- [x] `curl 127.0.0.1:19002/health` → `{"status":"ok",...}`
-- [x] `curl 127.0.0.1:3000/api/v1/health` → StudyLog 仍 `{"status":"ok",...}`
-- [ ] 填写文档文末「服务登记表」回传负责人
+## 三、把当前数据迁移到线上（保持隔离）
+
+### 原理
+
+- 生产数据库就是项目内的 `server/data/wedding.db`，**不在 git 中**，后续 `git pull` / 重新部署都不会覆盖它。
+- 迁移只做**一次**：把开发机当前数据导出 → 导入生产机。导入后，生产机数据独立演进，开发机继续做本地测试数据，两边互不影响。
+- 推荐使用应用自带的「JSON 备份」导入，不需要停服务、不需要手工拷数据库文件。
+
+### 方式 A（推荐）：JSON 备份导入
+
+**第 1 步：在开发机导出一份当前数据**
+
+网页操作：打开 `http://<开发机IP>:19002/settings` → 点「导出备份」，得到 `wedding-backup-*.json`。
+
+或在开发机命令行导出（本项目已生成一份当日快照，可直接用）：
+
+```bash
+cd /root/applications/wedding-plan
+ls server/backups/manual-pre-online-*.json
+```
+
+**第 2 步：把备份文件传到生产机**
+
+```bash
+scp /root/applications/wedding-plan/server/backups/manual-pre-online-20261126.json \
+    root@<生产机公网IP>:/root/wedding-backup.json
+```
+
+**第 3 步：在生产机上导入**
+
+```bash
+curl -s -X POST http://127.0.0.1/api/backup \
+  -H 'Content-Type: application/json' \
+  --data-binary @/root/wedding-backup.json
+# 返回 {"ok":true} 即成功
+```
+
+也可以在生产机浏览器打开 `http://<生产机IP>/settings`，用「导入备份」选择文件（文件需先下载到操作电脑上）。
+
+> 导入会**清空并替换**生产库现有数据（包括首次启动的模板），这正是首次上线想要的效果。
+> 如果之后开发机数据又有变动，重新导出再导入一次即可；导入是覆盖式的。
+
+**第 4 步：核对**
+
+```bash
+curl -s http://127.0.0.1/api/settings
+# 应看到新人姓名、婚期、场地等真实数据
+```
+
+再刷新网页，检查首页倒计时、花销、物品、任务、宾客等数据是否齐全。
+
+### 方式 B（备选）：直接复制数据库快照
+
+适合想“原样搬库”的场景。开发机生成一致性快照：
+
+```bash
+cd /root/applications/wedding-plan
+node -e "const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('server/data/wedding.db');db.exec(\"VACUUM INTO 'server/backups/manual-pre-online.db'\")"
+```
+
+传到生产机并替换（**必须先停服务**）：
+
+```bash
+scp server/backups/manual-pre-online.db root@<生产机公网IP>:/root/wedding-snapshot.db
+
+# 生产机
+systemctl stop wedding-plan
+cp /root/wedding-snapshot.db /root/applications/wedding-plan/server/data/wedding.db
+rm -f /root/applications/wedding-plan/server/data/wedding.db-wal \
+      /root/applications/wedding-plan/server/data/wedding.db-shm
+systemctl start wedding-plan
+curl -s http://127.0.0.1/health
+```
+
+### 迁移后的隔离说明
+
+- 生产机：`/root/applications/wedding-plan/server/data/wedding.db`（独立文件）
+- 开发机：`/root/applications/wedding-plan/server/data/wedding.db`（独立文件）
+- 两个文件都在 git 忽略列表中，**不会通过代码同步互相覆盖**
+- 生产机的日志 `server/logs/`、自动备份 `server/backups/` 同样只属于生产机
+
+## 四、日常更新（开发机改，生产机拉）
+
+```bash
+# 开发机：正常改代码并推送
+cd /root/applications/wedding-plan
+git add -A
+git commit -m "feat: xxx"
+git push origin main
+
+# 生产机：只拉取并部署（不要在生产机改任何代码）
+cd /root/applications/wedding-plan
+./deploy/deploy.sh
+```
+
+更新不会影响生产数据：`git pull` 只更新代码，数据库、`.env`、日志、备份都会被保留。
+若生产机工作区有本地改动，`deploy.sh` 会终止并提示先恢复干净。
+
+### 回滚
+
+推荐在开发机上反向提交后重新部署（生产机保持只读）：
+
+```bash
+# 开发机
+git revert <要撤销的提交>
+git push origin main
+
+# 生产机
+cd /root/applications/wedding-plan && ./deploy/deploy.sh
+```
 
 ## 五、运维速查
 
 ```bash
-systemctl status wedding-plan          # 服务状态
-journalctl -u wedding-plan -f          # 实时日志（文件日志在 logs/，保留 14 天）
-ls -t server/backups/ | head           # 每日备份（保留 30 份）
-vim .env && systemctl restart wedding-plan   # 改配置（如换端口）
-
-# 回滚版本
-cd /root/wedding-plan
-git log --oneline -5
-git checkout <旧提交> && ./deploy/deploy.sh && git checkout main
-
-# 完全退役（文档 7 节：不留系统残渣）
-systemctl disable --now wedding-plan
-sudo rm /etc/systemd/system/wedding-plan.service && systemctl daemon-reload
-rm -rf /root/wedding-plan   # ⚠️ 含数据库，退役前先在网页设置页导出备份
+systemctl status wedding-plan              # 服务状态
+journalctl -u wedding-plan -f              # 实时日志
+tail -f server/logs/wedding-$(date +%F).log   # 文件日志（保留 14 天）
+ls -t server/backups/ | head               # 每日数据库备份（保留 30 份）
+curl -s http://127.0.0.1/health            # 健康检查
 ```
 
 ## 六、常见问题
 
-- **公网访问不了？** 服务监听 `0.0.0.0:19002`，需负责人在阿里云安全组放行 19002/TCP（文档红线，开发者不可自行修改）。
-- **端口被占用？** 脚本直接终止并提示，用 `ss -tlnp` 排查；禁止换端口硬抢（文档第 9 节，冲突一律联系负责人）。
-- **生产数据想改到本地调试？** 生产机：设置页「导出备份」→ 开发机「导入备份」。数据库文件本身永不入 git，线上/线下天然隔离。
-- **构建内存不足？** 脚本已限堆 512MB 并在构建后删除 devDependencies；仍失败则用 `--dry-run` 排查或联系负责人。
+- **公网打不开？** 先确认 `ss -tlnp | grep ':80 '` 有 node 监听，再检查阿里云安全组是否放行 80/TCP。
+- **80 端口被占用？** 脚本会直接终止并提示。不要杀进程、不要改 nginx，联系服务器负责人处理。
+- **80 端口启动失败（Permission denied / SELinux）？** 服务以 root 运行，正常可绑定 80；若日志提示权限或 SELinux 拒绝，先执行 `getenforce` 查看。生产机若为 Enforcing，需要负责人放行 80（不要自行修改系统安全配置）。
+- **部署后数据没了？** 检查是否误删 `server/data/`；生产数据不在 git 中，误删只能从 `server/backups/` 或开发机重新导入备份恢复。
+- **想改生产端口？** 编辑生产机 `.env` 的 `PORT=` 后重新执行 `./deploy/deploy.sh`；安全组需同步放行新端口。
+- **完全退役？**
+
+```bash
+systemctl disable --now wedding-plan
+rm -f /etc/systemd/system/wedding-plan.service
+systemctl daemon-reload
+rm -rf /root/applications/wedding-plan   # ⚠️ 含数据库，删除前先导出备份
+```
