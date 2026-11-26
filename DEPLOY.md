@@ -1,9 +1,9 @@
 # 🚀 线上部署手册（阿里云生产机）
 
-> 适用环境：阿里云 ECS 2C2G / 40GB，已运行 StudyLog（3000 端口）。
-> **生产目录：`/root/applications/wedding-plan`　生产端口：`80`（直接 `http://<服务器IP>/`）**
-> 本版按项目负责人最新要求调整：生产端口 80、目录 `/root/applications/wedding-plan`；开发机端口保持 19002。
-> **分工：开发机只写代码并 push；生产机只 `git pull`，禁止改代码、提交和 push。**
+> 适用环境：阿里云 ECS 2C2G / 40GB，已运行 StudyLog（3000）与 Caddy（80/8443）。
+> **生产目录：`/root/applications/wedding-plan`**
+> **公网入口：Caddy 的 80 端口 → 反代到本服务 `127.0.0.1:19002`**
+> **分工：开发机写代码并 push；生产机只 `git pull`，禁止改代码、提交和 push。**
 
 ## 一、两台机器与隔离总览
 
@@ -11,7 +11,7 @@
 |---|---|---|
 | 角色 | 日常开发、测试 | 7×24 对外运行，只部署不开发 |
 | 目录 | `/root/applications/wedding-plan` | **`/root/applications/wedding-plan`**（自包含） |
-| 端口 | **19002**（保持不变） | **80**（`http://<公网IP>/`） |
+| 端口 | **19002**（`0.0.0.0`，局域网可访问） | **`127.0.0.1:19002`（仅本机）**，公网由 **Caddy 80** 反代 |
 | 代码权限 | 可 commit / push | **只读：只允许 pull** |
 | 数据库 | `server/data/wedding.db`（本机私有） | `server/data/wedding.db`（git 忽略，独立文件） |
 | 鉴权 | 无 | **无（按要求不启用登录鉴权）** |
@@ -22,9 +22,9 @@
 
 ## 二、首次部署（生产机，root 执行）
 
-### 前置（由服务器负责人操作）
+### 前置
 
-1. 阿里云安全组放行 **80/TCP**（公网访问必需）。
+1. 阿里云安全组已放行 **80/TCP**（Caddy 使用；8443 按现有配置保留）。
 2. 生产机可访问 GitHub，并为本仓库添加 **只读 Deploy Key**：
 
 ```bash
@@ -39,17 +39,18 @@ Host github.com
 EOF
 ```
 
-### 1. 登录生产机，先核实环境
+### 1. 登录生产机，核实环境
 
 ```bash
-ss -tlnp                  # 确认 80 端口空闲；3000 为 StudyLog；22 为 SSH
-systemctl status studylog --no-pager   # StudyLog 必须正常运行，部署全程不动它
+ss -tlnp                  # 80/8443 应为 caddy；3000 为 StudyLog；19002 应为空闲
+systemctl status caddy --no-pager      # Caddy 正常运行
+systemctl status studylog --no-pager   # StudyLog 正常运行，部署全程不动它
 free -m                   # available 建议 ≥ 1GB
 node -v                   # 必须 ≥ 22.5（使用内置 node:sqlite）
 ```
 
-> ⚠️ 如果 80 已被其他进程占用（例如 nginx），**不要杀进程、不要改 nginx**，先停下联系服务器负责人。
-> 本服务直接监听 80；生产机上不应再让其他程序占用 80。
+> ⚠️ 80 由 Caddy 占用是**正常现象**，本服务不再直接监听 80。
+> 如果 19002 被其他进程占用，先停下排查；不要杀 Caddy / StudyLog。
 
 ### 2. 克隆代码到生产目录
 
@@ -68,13 +69,48 @@ git remote -v            # fetch 为 GitHub 地址，push 显示 DISABLED 即正
 
 `deploy.sh` 还会在拉代码前检查工作区：只要生产机有未提交的本地改动，脚本会直接终止，避免“线上偷偷改代码”。
 
-### 4. 一键部署
+### 4. 配置 Caddy 反代
+
+先查看现有配置，**不要覆盖任何已有站点块**：
+
+```bash
+cat /etc/caddy/Caddyfile
+ls -la /etc/caddy/
+```
+
+在现有配置中**新增**一个站点块（示例，域名换成你自己的）：
+
+```caddyfile
+wedding.example.com {
+    reverse_proxy 127.0.0.1:19002
+}
+```
+
+如果只想走 HTTP 80、不要 HTTPS：
+
+```caddyfile
+http://wedding.example.com {
+    reverse_proxy 127.0.0.1:19002
+}
+```
+
+校验并平滑重载（不会中断现有站点）：
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile
+systemctl reload caddy
+```
+
+> 如果你没有域名、只能用 `http://<IP>/` 访问，请先把现有 `Caddyfile` 发我确认。
+> 直接在 catch-all 里加路径可能需要同时调整前端 base，不能盲目改。
+
+### 5. 一键部署应用
 
 ```bash
 ./deploy/deploy.sh
 ```
 
-脚本会自动完成：预检（端口 / StudyLog / 内存 / Node）→ `git pull --ff-only` → `npm ci` → 构建前端 → 生成 `.env`（`PORT=80`、`TZ=Asia/Shanghai`）→ 安装并重启 systemd 单元 `wedding-plan` → 健康检查与 StudyLog 零干扰验证。
+脚本会自动完成：预检（19002 / StudyLog / Caddy / 内存 / Node）→ `git pull --ff-only` → `npm ci` → 构建前端 → 生成 `.env`（`PORT=19002`、`HOST=127.0.0.1`、`TZ=Asia/Shanghai`）→ 安装并重启 systemd 单元 `wedding-plan` → 内部健康检查与 StudyLog 零干扰验证。
 
 首次也可只演练、不动服务：
 
@@ -82,19 +118,20 @@ git remote -v            # fetch 为 GitHub 地址，push 显示 DISABLED 即正
 ./deploy/deploy.sh --dry-run
 ```
 
-### 5. 验收
+### 6. 验收
 
 ```bash
-curl -s http://127.0.0.1/health
+curl -s http://127.0.0.1:19002/health
 # {"status":"ok","app":"wedding-plan",...}
 
 curl -s http://127.0.0.1:3000/api/v1/health
 # StudyLog 仍正常
 
 systemctl status wedding-plan --no-pager
+systemctl status caddy --no-pager
 ```
 
-浏览器打开 `http://<生产机公网IP>/` 应能看到备婚首页（首次启动会带一套模板数据，下一步会替换成你的真实数据）。
+浏览器打开 `http://<域名>/`（或你配置的 Caddy 入口）应能看到备婚首页。首次启动会带一套模板数据，下一步会替换成真实数据。
 
 ## 三、把当前数据迁移到线上（保持隔离）
 
@@ -127,13 +164,13 @@ scp /root/applications/wedding-plan/server/backups/manual-pre-online-20261126.js
 **第 3 步：在生产机上导入**
 
 ```bash
-curl -s -X POST http://127.0.0.1/api/backup \
+curl -s -X POST http://127.0.0.1:19002/api/backup \
   -H 'Content-Type: application/json' \
   --data-binary @/root/wedding-backup.json
 # 返回 {"ok":true} 即成功
 ```
 
-也可以在生产机浏览器打开 `http://<生产机IP>/settings`，用「导入备份」选择文件（文件需先下载到操作电脑上）。
+也可以在生产机浏览器打开 `http://<域名>/settings`，用「导入备份」选择文件（文件需先下载到操作电脑上）。
 
 > 导入会**清空并替换**生产库现有数据（包括首次启动的模板），这正是首次上线想要的效果。
 > 如果之后开发机数据又有变动，重新导出再导入一次即可；导入是覆盖式的。
@@ -141,7 +178,7 @@ curl -s -X POST http://127.0.0.1/api/backup \
 **第 4 步：核对**
 
 ```bash
-curl -s http://127.0.0.1/api/settings
+curl -s http://127.0.0.1:19002/api/settings
 # 应看到新人姓名、婚期、场地等真实数据
 ```
 
@@ -167,7 +204,7 @@ cp /root/wedding-snapshot.db /root/applications/wedding-plan/server/data/wedding
 rm -f /root/applications/wedding-plan/server/data/wedding.db-wal \
       /root/applications/wedding-plan/server/data/wedding.db-shm
 systemctl start wedding-plan
-curl -s http://127.0.0.1/health
+curl -s http://127.0.0.1:19002/health
 ```
 
 ### 迁移后的隔离说明
@@ -210,25 +247,28 @@ cd /root/applications/wedding-plan && ./deploy/deploy.sh
 ## 五、运维速查
 
 ```bash
-systemctl status wedding-plan              # 服务状态
-journalctl -u wedding-plan -f              # 实时日志
-tail -f server/logs/wedding-$(date +%F).log   # 文件日志（保留 14 天）
+systemctl status wedding-plan              # 应用状态
+systemctl status caddy                     # 公网入口状态
+journalctl -u wedding-plan -f              # 应用实时日志
+journalctl -u caddy -f                     # Caddy 实时日志
+tail -f server/logs/wedding-$(date +%F).log   # 应用文件日志（保留 14 天）
 ls -t server/backups/ | head               # 每日数据库备份（保留 30 份）
-curl -s http://127.0.0.1/health            # 健康检查
+curl -s http://127.0.0.1:19002/health      # 应用内部健康检查
 ```
 
 ## 六、常见问题
 
-- **公网打不开？** 先确认 `ss -tlnp | grep ':80 '` 有 node 监听，再检查阿里云安全组是否放行 80/TCP。
-- **80 端口被占用？** 脚本会直接终止并提示。不要杀进程、不要改 nginx，联系服务器负责人处理。
-- **80 端口启动失败（Permission denied / SELinux）？** 服务以 root 运行，正常可绑定 80；若日志提示权限或 SELinux 拒绝，先执行 `getenforce` 查看。生产机若为 Enforcing，需要负责人放行 80（不要自行修改系统安全配置）。
+- **公网打不开？** 依次检查：`ss -tlnp` 中 Caddy 是否监听 80、`systemctl status caddy`、Caddyfile 是否有站点块、阿里云安全组是否放行 80/TCP。
+- **Caddy 返回 502？** 通常是应用没启动或端口不对：`systemctl status wedding-plan`、`curl http://127.0.0.1:19002/health`。
+- **80 端口被非 Caddy 进程占用？** 先停下，不要杀进程、不要改 nginx/Caddy 现有配置，联系服务器负责人。
 - **部署后数据没了？** 检查是否误删 `server/data/`；生产数据不在 git 中，误删只能从 `server/backups/` 或开发机重新导入备份恢复。
-- **想改生产端口？** 编辑生产机 `.env` 的 `PORT=` 后重新执行 `./deploy/deploy.sh`；安全组需同步放行新端口。
+- **`.env` 已存在但端口是 80 / HOST=0.0.0.0？** 这是旧的直连配置；改成 `PORT=19002`、`HOST=127.0.0.1` 后重新执行 `./deploy/deploy.sh`，或删掉 `.env` 让脚本重新生成。
 - **完全退役？**
 
 ```bash
 systemctl disable --now wedding-plan
 rm -f /etc/systemd/system/wedding-plan.service
 systemctl daemon-reload
+# Caddyfile 中删除对应站点块后：systemctl reload caddy
 rm -rf /root/applications/wedding-plan   # ⚠️ 含数据库，删除前先导出备份
 ```

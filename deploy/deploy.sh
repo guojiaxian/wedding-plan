@@ -5,7 +5,8 @@
 #
 # 约束来源：《新服务环境准备要求.md》，并按项目负责人最新要求调整：
 #   - 生产目录：/root/applications/wedding-plan（自包含：代码/依赖/数据/日志/备份均在其内）
-#   - 生产端口：80（以 .env 为准；开发机端口保持 19002）
+#   - 公网入口：Caddy 监听 80/8443，反代到本服务 127.0.0.1:19002
+#   - 本服务端口：19002（只监听本机；开发机端口同样为 19002）
 #   - 生产机只读：只允许 git pull，禁止本地修改/提交/推送
 #   - 不触碰 /root/studylog 及其任何文件（仅做只读健康探测用于零干扰证明）
 #   - 不改系统 Node / 不 npm i -g / 不装常驻数据库 / 不改系统配置
@@ -21,9 +22,9 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="wedding-plan"
 ENV_FILE="$APP_DIR/.env"
-# 端口优先级：环境变量 PORT > 已有 .env 中的 PORT > 默认 80（生产）
+# 应用内部端口：环境变量 PORT > 已有 .env 中的 PORT > 默认 19002（由 Caddy 反代）
 PORT_FROM_ENV="$(sed -n 's/^[[:space:]]*PORT[[:space:]]*=[[:space:]]*//p' "$ENV_FILE" 2>/dev/null | tail -1 | tr -d "\"' " || true)"
-PORT="${PORT:-${PORT_FROM_ENV:-80}}"
+PORT="${PORT:-${PORT_FROM_ENV:-19002}}"
 NODE_BIN="/usr/bin/node"
 STUDYLOG_HEALTH="http://127.0.0.1:3000/api/v1/health"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
@@ -65,6 +66,13 @@ if systemctl list-unit-files 2>/dev/null | grep -q '^studylog\.service'; then
   fi
 else
   warn "未检测到 studylog 单元（当前可能不是生产机），跳过相关检查"
+fi
+
+# 公网 80 由 Caddy 提供；本服务只监听 127.0.0.1:19002
+if systemctl is-active --quiet caddy 2>/dev/null; then
+  say "Caddy 运行中 ✓（公网 80/8443 由 Caddy 提供，本服务不直接占用 80）"
+else
+  warn "未检测到运行中的 caddy：部署后公网 80 将无法访问，请按 DEPLOY.md 配置反代"
 fi
 
 AVAIL_MB=$(free -m | awk '/^Mem:/{print $7}')
@@ -152,6 +160,7 @@ say "部署后内存 available: ${AVAIL_AFTER}MB"
 say "Node 版本核对: 部署前 ${NODE_BEFORE} / 部署后 $("$NODE_BIN" -v)"
 
 echo ""
-say "✅ 部署完成：http://127.0.0.1:${PORT} （局域网/公网访问需服务器 IP + 阿里云安全组放行 ${PORT}/TCP，由负责人操作）"
+say "✅ 部署完成：本服务 http://127.0.0.1:${PORT}（仅本机，供 Caddy 反代）"
+say "   公网入口：Caddy 80 → 127.0.0.1:${PORT}（按 DEPLOY.md 配置站点并 reload caddy）"
 say "   数据库: ${APP_DIR}/server/data/（不入 git，与开发环境物理隔离）"
 say "   日志:   ${APP_DIR}/server/logs/（按天轮转，保留 14 天）；每日备份: ${APP_DIR}/server/backups/（保留 30 份）"
