@@ -222,6 +222,9 @@ button { font-family: inherit; }
   .topbar { display: flex; }
   .tabbar { display: flex; }
   .main-inner { max-width: 100%; }
+  /* 顶栏已显示页面标题，页内标题不再重复 */
+  .page-head .page-title { display: none; }
+  .page-head:not(:has(button, a)) { display: none; }
 }
 
 /* ===== 通用组件样式 ===== */
