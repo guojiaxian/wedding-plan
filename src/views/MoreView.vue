@@ -35,7 +35,7 @@ const cards = NAV_ITEMS.filter(it => MORE_PATHS.includes(it.path))
 </template>
 
 <style scoped>
-.more-grid { display: flex; flex-direction: column; gap: 10px; }
+.more-grid { display: flex; flex-direction: column; gap: 12px; }
 .more-card {
   display: flex; align-items: center; gap: 14px; padding: 16px 18px;
   transition: transform .15s;

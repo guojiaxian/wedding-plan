@@ -128,7 +128,7 @@ async function remove(s: Staff) {
 
 <style scoped>
 .stat-line { display: flex; gap: 22px; flex-wrap: wrap; font-size: 13.5px; color: var(--secondary); }
-.staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-top: 16px; }
 .staff-card { padding: 16px; }
 .staff-head { display: flex; align-items: center; gap: 10px; }
 .staff-icon {

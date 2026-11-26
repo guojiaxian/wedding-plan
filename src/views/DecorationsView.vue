@@ -426,7 +426,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.stat-line { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; font-size: 13.5px; color: var(--secondary); }
+.stat-line { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; font-size: 13.5px; color: var(--secondary); margin-bottom: 12px; }
 .group-card { margin-bottom: 12px; padding: 14px 18px; }
 .group-head { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
 .group-head .gi { font-size: 15px; }
