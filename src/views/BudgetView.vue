@@ -148,12 +148,12 @@ async function removeCat(g: { id: number; name: string }) {
           <span class="cnums num">
             <template v-if="g.total">
               <span :class="{ 'over': g.spent > g.total }">已付 ¥{{ money(g.spent) }} <span class="muted">/ ¥{{ money(g.total) }}</span></span>
-              <span v-if="g.remain !== null && g.remain >= 0">· 待支付 <b class="pink">¥{{ money(g.remain) }}</b></span>
-              <span v-else-if="g.remain !== null" class="over">· 已超出 ¥{{ money(-g.remain) }}</span>
+              <span v-if="g.remain !== null && g.remain >= 0">待支付 <b class="pink">¥{{ money(g.remain) }}</b></span>
+              <span v-else-if="g.remain !== null" class="over">已超出 ¥{{ money(-g.remain) }}</span>
             </template>
             <span v-else-if="g.spent > 0">已付 ¥{{ money(g.spent) }}</span>
             <span v-else class="muted">未设总价</span>
-            <span class="muted" v-if="g.itemsSpent > 0">· 含已购物品 ¥{{ money(g.itemsSpent) }}</span>
+            <span class="muted" v-if="g.itemsSpent > 0">含已购物品 ¥{{ money(g.itemsSpent) }}</span>
           </span>
           <span class="ops" v-if="g.id">
             <button class="btn btn-icon" title="编辑名称 / 总价 / 已付" @click="openCatEdit(g)">✏️</button>
@@ -219,18 +219,29 @@ async function removeCat(g: { id: number; name: string }) {
 .ov-stats { display: flex; gap: 34px; flex: 1; flex-wrap: wrap; }
 .ov-item .big { font-size: 22px; font-weight: 800; margin-top: 4px; }
 .ov-tip { flex-basis: 100%; font-size: 13px; }
-.cat-list { display: flex; flex-direction: column; gap: 4px; }
+.cat-list { display: flex; flex-direction: column; gap: 8px; }
 .cat-line {
   display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
   padding: 11px 12px; border-radius: var(--radius-sm);
-  transition: background .15s;
+  border: 1px solid var(--line);
+  transition: background .15s, border-color .15s;
 }
-.cat-line:hover { background: var(--primary-soft); }
+.cat-line:hover { background: var(--primary-soft); border-color: var(--primary); }
 .cname { font-size: 14.5px; }
-.cnums { margin-left: auto; display: flex; flex-wrap: wrap; gap: 2px 0; font-size: 13.5px; }
+.cnums { margin-left: auto; display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 13.5px; }
 .cnums b { font-size: 15px; }
 .cnums .over { color: var(--danger); }
 .ops { display: flex; gap: 6px; }
 .form-tip { font-size: 12.5px; margin-top: 10px; }
+/* 手机端：名称独占一行，金额与操作按钮在下一行，避免换行忽上忽下 */
+@media (max-width: 767px) {
+  .cat-line {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center; gap: 3px 10px;
+  }
+  .cname { grid-column: 1 / -1; }
+  .cnums { grid-column: 1; margin-left: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .ops { grid-column: 2; grid-row: 2; }
+}
 @media (max-width: 480px) { .ov-stats { gap: 18px; } .ov-item .big { font-size: 18px; } }
 </style>

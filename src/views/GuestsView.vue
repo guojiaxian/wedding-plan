@@ -218,7 +218,7 @@ function cycleRsvp(g: Guest) {
 <style scoped>
 .filter-bar { display: flex; flex-direction: column; gap: 10px; }
 .filter-bar .search { max-width: 360px; }
-.guest-list { display: flex; flex-direction: column; gap: 8px; }
+.guest-list { display: flex; flex-direction: column; gap: 12px; }
 .guest-row.declined { opacity: .6; }
 .rsvp-pill {
   border: none; border-radius: 999px; padding: 6px 12px; font-size: 12px;
