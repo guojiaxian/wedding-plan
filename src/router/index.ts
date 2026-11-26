@@ -12,13 +12,18 @@ export const NAV_ITEMS = [
   { path: '/settings', title: '设置', icon: '⚙️' }
 ]
 
-// 移动端底部导航：其余入口收纳在「更多」
+// 移动端底部导航：两排各 5 个，常用模块放在下排，首页居中
 const TAB_ITEMS = [
+  { path: '/guests', title: '宾客', icon: '💌' },
+  { path: '/decorations', title: '布置', icon: '🎀' },
+  { path: '/staff', title: '分工', icon: '👥' },
+  { path: '/settings', title: '设置', icon: '⚙️' },
+  { path: '/more', title: '更多', icon: '🗂️' },
+  { path: '/items', title: '清单', icon: '🛍️' },
+  { path: '/tasks', title: '任务', icon: '📝' },
   { path: '/', title: '首页', icon: '🏠' },
   { path: '/budget', title: '花销', icon: '💰' },
-  { path: '/items', title: '清单', icon: '🛍️' },
-  { path: '/timeline', title: '流程', icon: '⏰' },
-  { path: '/more', title: '更多', icon: '🗂️' }
+  { path: '/timeline', title: '流程', icon: '⏰' }
 ]
 export { TAB_ITEMS }
 

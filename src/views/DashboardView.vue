@@ -43,6 +43,14 @@ const countdownLabel = computed(() => {
   return `${Math.abs(countdown.value)}`
 })
 
+// 点击场地名称在高德地图中搜索（移动端优先唤起 App）
+const venueMapUrl = computed(() => {
+  const venue = store.settings?.venue?.trim()
+  return venue
+    ? `https://uri.amap.com/search?keyword=${encodeURIComponent(venue)}&callnative=1&src=wedding-plan`
+    : ''
+})
+
 async function finishTask(t: Task) {
   try {
     t.status = 'done'
@@ -61,7 +69,9 @@ async function finishTask(t: Task) {
         <div class="hero-names">{{ store.coupleText }}</div>
         <div class="hero-line" v-if="store.dateText">📅 {{ store.dateText }}</div>
         <div class="hero-line" v-else>📅 婚期待定 <span class="tbd-badge">待定</span></div>
-        <div class="hero-line" v-if="store.settings?.venue">📍 {{ store.settings.venue }}</div>
+        <a class="hero-line venue-link" v-if="store.settings?.venue" :href="venueMapUrl" target="_blank" rel="noopener">
+          📍 {{ store.settings.venue }}
+        </a>
         <div class="hero-line muted" v-else>📍 待定婚礼场地 · <router-link to="/settings" class="pink">去设置</router-link></div>
       </div>
       <div class="hero-count">
@@ -158,6 +168,8 @@ async function finishTask(t: Task) {
 }
 .hero-names { font-size: 22px; font-weight: 800; letter-spacing: 1px; }
 .hero-line { font-size: 13.5px; margin-top: 6px; color: var(--secondary); font-weight: 500; }
+.venue-link { display: inline-block; cursor: pointer; }
+.venue-link:hover { color: var(--primary-deep); text-decoration: underline; }
 .hero-count { text-align: center; }
 .hero-count .n { font-size: 52px; font-weight: 800; color: var(--primary-deep); font-family: Georgia, serif; line-height: 1.1; }
 .hero-count .t { font-size: 12.5px; color: var(--secondary); font-weight: 600; }

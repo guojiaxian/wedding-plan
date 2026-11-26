@@ -24,7 +24,7 @@ let hideTimer: number | undefined
 export function toast(msg: string, type: 'ok' | 'err' = 'ok') {
   if (!toastEl) {
     toastEl = document.createElement('div')
-    toastEl.style.cssText = 'position:fixed;left:50%;bottom:96px;transform:translateX(-50%);z-index:999;padding:10px 20px;border-radius:999px;font-size:14px;font-weight:600;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);transition:opacity .25s;pointer-events:none;max-width:80vw;text-align:center'
+    toastEl.style.cssText = 'position:fixed;left:50%;bottom:120px;transform:translateX(-50%);z-index:999;padding:10px 20px;border-radius:999px;font-size:14px;font-weight:600;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.18);transition:opacity .25s;pointer-events:none;max-width:80vw;text-align:center'
     document.body.appendChild(toastEl)
   }
   toastEl.textContent = msg
