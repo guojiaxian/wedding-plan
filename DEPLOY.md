@@ -2,7 +2,7 @@
 
 > 适用环境：阿里云 ECS 2C2G / 40GB，已运行 StudyLog（3000）与 Caddy（80/8443）。
 > **生产目录：`/root/applications/wedding-plan`**
-> **公网入口：Caddy 的 80 端口 → 反代到本服务 `127.0.0.1:19002`**
+> **公网入口：Caddy 80（示例 `http://wedding.xiaodui.top/`）→ 本服务 `127.0.0.1:19002`**
 > **分工：开发机写代码并 push；生产机只 `git pull`，禁止改代码、提交和 push。**
 
 ## 一、两台机器与隔离总览
@@ -71,28 +71,32 @@ git remote -v            # fetch 为 GitHub 地址，push 显示 DISABLED 即正
 
 ### 4. 配置 Caddy 反代
 
-先查看现有配置，**不要覆盖任何已有站点块**：
+先备份并查看现有配置，**不要覆盖任何已有站点块**：
 
 ```bash
+cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-$(date +%F)
 cat /etc/caddy/Caddyfile
 ls -la /etc/caddy/
 ```
 
-在现有配置中**新增**一个站点块（示例，域名换成你自己的）：
+现有 `xiaodui.top:8443` 站点设置了 HSTS。**不要用主域名 `xiaodui.top` 的 80 端口**：
+浏览器可能因 HSTS 把 `http://xiaodui.top` 强制升级到 `https://xiaodui.top:443`，而 443 当前没有站点。
+请使用一个子域名（示例 `wedding.xiaodui.top`），并在 DNS 添加 A 记录指向生产机公网 IP：
+
+```bash
+dig +short wedding.xiaodui.top   # 应返回生产机 IP
+```
+
+在 Caddyfile **末尾新增**站点块（子域名换成你的）：
 
 ```caddyfile
-wedding.example.com {
+http://wedding.xiaodui.top {
     reverse_proxy 127.0.0.1:19002
 }
 ```
 
-如果只想走 HTTP 80、不要 HTTPS：
-
-```caddyfile
-http://wedding.example.com {
-    reverse_proxy 127.0.0.1:19002
-}
-```
+> 你贴出的现有站点地址两侧带反引号；如果 `validate` 报错指向它，去掉反引号后再试。
+> 不要删除或修改已有的 `https://xiaodui.top:8443` 站点块。
 
 校验并平滑重载（不会中断现有站点）：
 
@@ -101,7 +105,13 @@ caddy validate --config /etc/caddy/Caddyfile
 systemctl reload caddy
 ```
 
-> 如果你没有域名、只能用 `http://<IP>/` 访问，请先把现有 `Caddyfile` 发我确认。
+如果 `systemctl reload caddy` 不可用，用：
+
+```bash
+caddy reload --config /etc/caddy/Caddyfile
+```
+
+> 如果不用子域名、只能用 `http://<IP>/` 访问，请先把现有 `Caddyfile` 发我确认。
 > 直接在 catch-all 里加路径可能需要同时调整前端 base，不能盲目改。
 
 ### 5. 一键部署应用
@@ -124,6 +134,9 @@ systemctl reload caddy
 curl -s http://127.0.0.1:19002/health
 # {"status":"ok","app":"wedding-plan",...}
 
+curl -s http://wedding.xiaodui.top/health
+# 经 Caddy 反代也应返回 {"status":"ok",...}
+
 curl -s http://127.0.0.1:3000/api/v1/health
 # StudyLog 仍正常
 
@@ -131,7 +144,7 @@ systemctl status wedding-plan --no-pager
 systemctl status caddy --no-pager
 ```
 
-浏览器打开 `http://<域名>/`（或你配置的 Caddy 入口）应能看到备婚首页。首次启动会带一套模板数据，下一步会替换成真实数据。
+浏览器打开 `http://wedding.xiaodui.top/` 应能看到备婚首页。首次启动会带一套模板数据，下一步会替换成真实数据。
 
 ## 三、把当前数据迁移到线上（保持隔离）
 
@@ -170,7 +183,7 @@ curl -s -X POST http://127.0.0.1:19002/api/backup \
 # 返回 {"ok":true} 即成功
 ```
 
-也可以在生产机浏览器打开 `http://<域名>/settings`，用「导入备份」选择文件（文件需先下载到操作电脑上）。
+也可以在生产机浏览器打开 `http://wedding.xiaodui.top/settings`，用「导入备份」选择文件（文件需先下载到操作电脑上）。
 
 > 导入会**清空并替换**生产库现有数据（包括首次启动的模板），这正是首次上线想要的效果。
 > 如果之后开发机数据又有变动，重新导出再导入一次即可；导入是覆盖式的。
