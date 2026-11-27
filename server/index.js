@@ -160,12 +160,24 @@ api.get('/share/:token', (req, res) => {
     budgetCategories: listAll('budget_categories'),
     itemCategories: listAll('item_categories'),
     items: listAll('items'),
+    expenses: listAll('expenses', 'id DESC'),
     tasks: listAll('tasks'),
     timeline: listAll('timeline_events'),
     staff: listAll('staff', 'id'),
     guests: listAll('guests', 'id'),
     decorations: listDecorationsWithImages()
   })
+})
+
+// 分享页按需加载参考图原图（同样凭分享令牌访问）
+api.get('/share/:token/images/:id', (req, res) => {
+  const token = getShareToken()
+  if (!token || req.params.token !== token) {
+    return res.status(404).json({ error: '分享链接无效或已失效' })
+  }
+  const row = getOne('decoration_images', req.params.id)
+  if (!row) return res.status(404).json({ error: '图片不存在' })
+  res.json(row)
 })
 
 // 除登录、分享快照外的所有 API 都需要有效会话
