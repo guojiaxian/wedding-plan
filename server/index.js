@@ -133,9 +133,24 @@ api.post('/auth/login', (req, res) => {
 })
 
 // 分享链接：无登录、只读；令牌存于 meta 表，首次生成后保持不变
+const SHARE_SECTIONS = ['overview', 'budget', 'items', 'tasks', 'timeline', 'decorations', 'seats', 'staff', 'guests']
+
 function getShareToken() {
   const row = db.prepare("SELECT value FROM meta WHERE key = 'share_token'").get()
   return row?.value || ''
+}
+
+// 分享栏目开关：未设置时默认全部展示
+function getShareSections() {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'share_sections'").get()
+  if (!row) return [...SHARE_SECTIONS]
+  try {
+    const list = JSON.parse(row.value)
+    const valid = SHARE_SECTIONS.filter(k => Array.isArray(list) && list.includes(k))
+    return valid.length ? valid : [...SHARE_SECTIONS]
+  } catch {
+    return [...SHARE_SECTIONS]
+  }
 }
 
 function ensureShareToken() {
@@ -153,27 +168,33 @@ api.get('/share/:token', (req, res) => {
   if (!token || req.params.token !== token) {
     return res.status(404).json({ error: '分享链接无效或已失效' })
   }
+  const sections = getShareSections()
+  const has = k => sections.includes(k)
   res.json({
     owner: db.prepare('SELECT username FROM users ORDER BY id LIMIT 1').get()?.username || 'admin',
     settings: db.prepare('SELECT * FROM settings WHERE id = 1').get(),
+    sections,
     summary: buildSummary(),
-    budgetCategories: listAll('budget_categories'),
-    itemCategories: listAll('item_categories'),
-    items: listAll('items'),
-    expenses: listAll('expenses', 'id DESC'),
-    tasks: listAll('tasks'),
-    timeline: listAll('timeline_events'),
-    staff: listAll('staff', 'id'),
-    guests: listAll('guests', 'id'),
-    decorations: listDecorationsWithImages()
+    budgetCategories: has('budget') ? listAll('budget_categories') : [],
+    itemCategories: has('items') ? listAll('item_categories') : [],
+    items: has('items') ? listAll('items') : [],
+    expenses: has('budget') ? listAll('expenses', 'id DESC') : [],
+    tasks: has('tasks') ? listAll('tasks') : [],
+    timeline: has('timeline') ? listAll('timeline_events') : [],
+    staff: has('staff') ? listAll('staff', 'id') : [],
+    guests: has('guests') || has('seats') ? listAll('guests', 'id') : [],
+    decorations: has('decorations') ? listDecorationsWithImages() : []
   })
 })
 
-// 分享页按需加载参考图原图（同样凭分享令牌访问）
+// 分享页按需加载参考图原图（同样凭分享令牌访问；未开放布置栏目时不可访问）
 api.get('/share/:token/images/:id', (req, res) => {
   const token = getShareToken()
   if (!token || req.params.token !== token) {
     return res.status(404).json({ error: '分享链接无效或已失效' })
+  }
+  if (!getShareSections().includes('decorations')) {
+    return res.status(404).json({ error: '该栏目未开放' })
   }
   const row = getOne('decoration_images', req.params.id)
   if (!row) return res.status(404).json({ error: '图片不存在' })
@@ -237,6 +258,21 @@ api.post('/auth/username', (req, res) => {
 // 获取分享令牌（首次调用时生成）
 api.get('/share-link', (_req, res) => {
   res.json({ token: ensureShareToken() })
+})
+
+// 分享栏目设置
+api.get('/share-settings', (_req, res) => {
+  res.json({ sections: getShareSections() })
+})
+
+api.put('/share-settings', (req, res) => {
+  const input = Array.isArray(req.body?.sections) ? req.body.sections : []
+  const sections = [...new Set(SHARE_SECTIONS.filter(k => input.includes(k)))]
+  if (!sections.length) {
+    return res.status(400).json({ error: '至少保留一个分享栏目' })
+  }
+  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('share_sections', ?)").run(JSON.stringify(sections))
+  res.json({ sections })
 })
 
 // ---------- 服务端输入净化（前端校验之外的最后一道防线） ----------

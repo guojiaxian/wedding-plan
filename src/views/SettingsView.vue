@@ -40,6 +40,7 @@ onMounted(() => {
     })
     weddingTbd.value = !s.wedding_date
   }).catch((e: any) => toast(e.message, 'err'))
+  loadShareSettings()
 })
 
 function toggleWeddingTbd(v: boolean) {
@@ -138,6 +139,39 @@ async function logout() {
   toast('已退出登录')
   router.replace('/login')
 }
+
+// ---------- 只读分享内容 ----------
+const SHARE_OPTIONS = [
+  { key: 'overview', label: '总览', icon: '🏠' },
+  { key: 'budget', label: '花销', icon: '💰' },
+  { key: 'items', label: '物品', icon: '🛍️' },
+  { key: 'tasks', label: '任务', icon: '📝' },
+  { key: 'timeline', label: '流程', icon: '⏰' },
+  { key: 'decorations', label: '布置', icon: '🎀' },
+  { key: 'seats', label: '座位', icon: '🪑' },
+  { key: 'staff', label: '分工', icon: '👥' },
+  { key: 'guests', label: '宾客', icon: '💌' }
+]
+const shareSections = ref<string[]>([])
+const savingShare = ref(false)
+
+async function loadShareSettings() {
+  try {
+    const r = await api.get<{ sections: string[] }>('/share-settings')
+    shareSections.value = r.sections
+  } catch (e: any) { toast(e.message, 'err') }
+}
+
+async function saveShareSettings() {
+  if (!shareSections.value.length) return toast('至少保留一个分享栏目', 'err')
+  savingShare.value = true
+  try {
+    const r = await api.put<{ sections: string[] }>('/share-settings', { sections: shareSections.value })
+    shareSections.value = r.sections
+    toast('分享内容已保存 ✓')
+  } catch (e: any) { toast(e.message, 'err') }
+  savingShare.value = false
+}
 </script>
 
 <template>
@@ -228,6 +262,24 @@ async function logout() {
     </div>
 
     <div class="card mt16">
+      <h3 class="section-title" style="margin-top:0">🔗 分享设置</h3>
+      <p class="muted" style="font-size: 13.5px">
+        选择只读分享页要展示的栏目。未勾选的栏目不会出现在分享页；总览里对应的统计也会一并隐藏。
+      </p>
+      <div class="share-opt-grid">
+        <label v-for="o in SHARE_OPTIONS" :key="o.key" class="share-opt" :class="{ active: shareSections.includes(o.key) }">
+          <input type="checkbox" class="ck" v-model="shareSections" :value="o.key" />
+          <span>{{ o.icon }} {{ o.label }}</span>
+        </label>
+      </div>
+      <div class="acct-ops">
+        <button class="btn btn-primary" :disabled="savingShare || !shareSections.length" @click="saveShareSettings">
+          {{ savingShare ? '保存中…' : '保存分享设置' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="card mt16">
       <h3 class="section-title" style="margin-top:0">🗄️ 数据管理</h3>
       <p class="muted" style="font-size: 13.5px">
         数据保存在本机数据库中。建议定期导出 JSON 备份，可在其他设备导入恢复，或用于更换电脑时迁移。
@@ -257,6 +309,14 @@ async function logout() {
 .name-row { display: flex; gap: 8px; }
 .name-row .input { flex: 1; min-width: 0; }
 .name-row .btn { flex-shrink: 0; }
+.share-opt-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; margin-top: 14px; }
+.share-opt {
+  display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+  border: 1.5px solid var(--line); border-radius: var(--radius-sm);
+  background: #fff; font-size: 13.5px; cursor: pointer; transition: all .15s;
+}
+.share-opt.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary-deep); font-weight: 600; }
+.share-opt .ck { flex-shrink: 0; }
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
 @media (max-width: 480px) { .theme-grid { grid-template-columns: 1fr; } }
 .theme-card {

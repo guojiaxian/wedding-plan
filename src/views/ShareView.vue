@@ -10,6 +10,7 @@ import type {
 interface ShareData {
   owner: string
   settings: Settings
+  sections: string[]
   summary: Summary
   budgetCategories: BudgetCategory[]
   itemCategories: ItemCategory[]
@@ -70,12 +71,22 @@ const preview = ref('')
 onMounted(async () => {
   try {
     data.value = await api.get<ShareData>('/share/' + encodeURIComponent(token))
+    if (!enabledSections.value.includes(tab.value) && visibleTabs.value.length) {
+      tab.value = visibleTabs.value[0].key
+    }
   } catch (e: any) {
     error.value = e.message || '分享链接无效'
   } finally {
     loading.value = false
   }
 })
+
+// 分享人可关闭部分栏目；未设置时默认全部展示
+const enabledSections = computed(() => data.value?.sections?.length
+  ? data.value.sections
+  : TABS.map(t => t.key))
+const visibleTabs = computed(() => TABS.filter(t => enabledSections.value.includes(t.key)))
+const hasSection = (key: string) => enabledSections.value.includes(key)
 
 // 先展示缩略图，再按需加载原图
 async function openPreview(im: DecorationImage) {
@@ -270,15 +281,15 @@ function itemSub(it: Item) {
         <div class="owner muted">由 {{ data.owner }} 分享 · 仅供查看，无法修改</div>
       </header>
 
-      <nav class="share-tabs">
-        <button v-for="t in TABS" :key="t.key" class="chip" :class="{ active: tab === t.key }" @click="tab = t.key">
+      <nav class="share-tabs" v-if="visibleTabs.length">
+        <button v-for="t in visibleTabs" :key="t.key" class="chip" :class="{ active: tab === t.key }" @click="tab = t.key">
           {{ t.icon }} {{ t.label }}
         </button>
       </nav>
 
       <!-- 总览 -->
       <template v-if="tab === 'overview'">
-        <div class="card">
+        <div class="card" v-if="hasSection('budget')">
           <h3 class="section-title" style="margin-top: 0">💰 预算进度</h3>
           <div class="budget-top">
             <div><span class="muted">预算上限</span><div class="num big">{{ budget?.totalBudget ? '¥' + money(budget.totalBudget) : '未设置' }}</div></div>
@@ -290,14 +301,14 @@ function itemSub(it: Item) {
           <div class="muted" style="font-size: 12px; margin-top: 6px" v-if="totalPrice">已使用 {{ budgetPercent }}%</div>
         </div>
 
-        <div class="stat-grid mt16">
-          <div class="stat-card"><div class="label">📝 任务完成</div><div class="value num">{{ taskStats.done }}/{{ taskStats.total }}</div><div class="sub">进行中 {{ taskStats.doing }} 项</div></div>
-          <div class="stat-card"><div class="label">🛍️ 物品已购</div><div class="value num">{{ itemStats.purchased }}/{{ itemStats.total }}</div><div class="sub">共 {{ itemStats.total }} 件</div></div>
-          <div class="stat-card"><div class="label">💌 宾客确认</div><div class="value num">{{ guestStats.confirmedHeads }}/{{ guestStats.invitedHeads }}</div><div class="sub">人出席 · 共 {{ guestStats.total }} 户</div></div>
-          <div class="stat-card"><div class="label">🎀 布置就绪</div><div class="value num">{{ decoStats.done }}/{{ decoStats.total }}</div><div class="sub">项</div></div>
+        <div class="stat-grid mt16" v-if="hasSection('tasks') || hasSection('items') || hasSection('guests') || hasSection('decorations')">
+          <div class="stat-card" v-if="hasSection('tasks')"><div class="label">📝 任务完成</div><div class="value num">{{ taskStats.done }}/{{ taskStats.total }}</div><div class="sub">进行中 {{ taskStats.doing }} 项</div></div>
+          <div class="stat-card" v-if="hasSection('items')"><div class="label">🛍️ 物品已购</div><div class="value num">{{ itemStats.purchased }}/{{ itemStats.total }}</div><div class="sub">共 {{ itemStats.total }} 件</div></div>
+          <div class="stat-card" v-if="hasSection('guests')"><div class="label">💌 宾客确认</div><div class="value num">{{ guestStats.confirmedHeads }}/{{ guestStats.invitedHeads }}</div><div class="sub">人出席 · 共 {{ guestStats.total }} 户</div></div>
+          <div class="stat-card" v-if="hasSection('decorations')"><div class="label">🎀 布置就绪</div><div class="value num">{{ decoStats.done }}/{{ decoStats.total }}</div><div class="sub">项</div></div>
         </div>
 
-        <div class="card mt16" v-if="upcoming.length">
+        <div class="card mt16" v-if="hasSection('tasks') && upcoming.length">
           <h3 class="section-title" style="margin-top: 0">⏳ 近期待办</h3>
           <div class="share-line" v-for="t in upcoming" :key="t.id">
             <span class="dot">⬜</span>
@@ -306,6 +317,10 @@ function itemSub(it: Item) {
               <div class="line-sub">截止 {{ t.due_date || '待定' }}<template v-if="t.assignee"> · {{ t.assignee }}</template></div>
             </div>
           </div>
+        </div>
+
+        <div class="card" v-if="!hasSection('budget') && !hasSection('tasks') && !hasSection('items') && !hasSection('guests') && !hasSection('decorations')">
+          <div class="empty muted">分享人仅开放了总览信息</div>
         </div>
       </template>
 
