@@ -541,10 +541,20 @@ function itemSub(it: Item) {
 .owner { font-size: 11.5px; margin-top: 12px; }
 
 .share-tabs {
-  display: flex; gap: 8px; overflow-x: auto; padding: 14px 2px 6px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  padding: 14px 2px 6px;
   position: sticky; top: 0; z-index: 5; background: var(--bg);
 }
-.share-tabs .chip { flex-shrink: 0; }
+.share-tabs .chip {
+  width: 100%; padding: 6px 4px; font-size: 12px;
+  white-space: nowrap; text-align: center;
+}
+@media (min-width: 768px) {
+  .share-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .share-tabs .chip { width: auto; padding: 6px 14px; font-size: 13px; }
+}
 
 .budget-top { display: flex; gap: 22px; flex-wrap: wrap; }
 .budget-top > div { min-width: 92px; }
