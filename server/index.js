@@ -223,7 +223,7 @@ api.post('/auth/username', (req, res) => {
     return res.status(400).json({ error: '账号名称需为 2-24 个字符' })
   }
   if (!/^[\w\u4e00-\u9fa5.@-]+$/.test(username)) {
-    return res.status(400).json({ error: '账号名称只能包含中文、字母、数字及 _ . @ -' })
+    return res.status(400).json({ error: '账号名称支持中文、字母、数字及 _ . @ -' })
   }
   const exists = findUserByName(username)
   if (exists && exists.id !== req.user.id) {

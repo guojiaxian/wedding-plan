@@ -200,9 +200,9 @@ async function logout() {
       </p>
       <div class="form-grid mt16">
         <div class="field full">
-          <label>账号名称</label>
+          <label>账号名称（支持中文）</label>
           <div class="name-row">
-            <input class="input" v-model.trim="username" maxlength="24" autocomplete="username" placeholder="2-24 个字符" />
+            <input class="input" v-model.trim="username" maxlength="24" autocomplete="username" placeholder="如：备婚管理员" />
             <button class="btn" :disabled="savingName || !username.trim() || username.trim() === auth.user?.username" @click="saveUsername">
               {{ savingName ? '保存中…' : '保存名称' }}
             </button>
