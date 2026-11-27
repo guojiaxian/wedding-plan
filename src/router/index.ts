@@ -13,20 +13,23 @@ export const NAV_ITEMS = [
   { path: '/settings', title: '设置', icon: '⚙️' }
 ]
 
-// 移动端底部导航：两排各 5 个，常用模块放在下排，首页居中
-const TAB_ITEMS = [
-  { path: '/guests', title: '宾客', icon: '💌' },
-  { path: '/decorations', title: '布置', icon: '🎀' },
-  { path: '/staff', title: '分工', icon: '👥' },
-  { path: '/settings', title: '设置', icon: '⚙️' },
-  { path: '/more', title: '更多', icon: '🗂️' },
-  { path: '/items', title: '清单', icon: '🛍️' },
-  { path: '/tasks', title: '任务', icon: '📝' },
-  { path: '/', title: '首页', icon: '🏠' },
-  { path: '/budget', title: '花销', icon: '💰' },
-  { path: '/timeline', title: '流程', icon: '⏰' }
+// 移动端底部导航：上排 4 个次要入口，下排 5 个常用入口（首页居中）
+const TAB_ROWS = [
+  [
+    { path: '/guests', title: '宾客', icon: '💌' },
+    { path: '/decorations', title: '布置', icon: '🎀' },
+    { path: '/staff', title: '分工', icon: '👥' },
+    { path: '/settings', title: '设置', icon: '⚙️' }
+  ],
+  [
+    { path: '/items', title: '清单', icon: '🛍️' },
+    { path: '/tasks', title: '任务', icon: '📝' },
+    { path: '/', title: '首页', icon: '🏠' },
+    { path: '/budget', title: '花销', icon: '💰' },
+    { path: '/timeline', title: '流程', icon: '⏰' }
+  ]
 ]
-export { TAB_ITEMS }
+export { TAB_ROWS }
 
 const router = createRouter({
   history: createWebHistory(),
@@ -42,7 +45,6 @@ const router = createRouter({
     { path: '/staff', component: () => import('../views/StaffView.vue'), meta: { title: '人员分工' } },
     { path: '/guests', component: () => import('../views/GuestsView.vue'), meta: { title: '宾客名单' } },
     { path: '/settings', component: () => import('../views/SettingsView.vue'), meta: { title: '设置' } },
-    { path: '/more', component: () => import('../views/MoreView.vue'), meta: { title: '更多功能' } },
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ],
   scrollBehavior: () => ({ top: 0 })

@@ -7,7 +7,7 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const username = ref('admin')
+const username = ref(localStorage.getItem('wp_last_username') || '')
 const password = ref('')
 const error = ref('')
 const loading = ref(false)
@@ -22,6 +22,7 @@ async function submit() {
   loading.value = true
   try {
     await auth.login(username.value.trim(), password.value)
+    localStorage.setItem('wp_last_username', username.value.trim())
     const target = typeof route.query.redirect === 'string'
       && route.query.redirect.startsWith('/')
       && !route.query.redirect.startsWith('//')

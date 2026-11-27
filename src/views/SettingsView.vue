@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api, toast } from '../api/client'
 import { useAppStore } from '../stores/app'
@@ -101,6 +101,23 @@ async function clearAll() {
 // ---------- 账号安全 ----------
 const pwd = reactive({ old: '', next: '', confirm: '' })
 const changing = ref(false)
+const username = ref(auth.user?.username || '')
+const savingName = ref(false)
+watch(() => auth.user?.username, v => { username.value = v || '' })
+
+async function saveUsername() {
+  const name = username.value.trim()
+  if (!name || name === auth.user?.username) return
+  if (name.length < 2 || name.length > 24) return toast('账号名称需为 2-24 个字符', 'err')
+  savingName.value = true
+  try {
+    await auth.updateUsername(name)
+    username.value = name
+    localStorage.setItem('wp_last_username', name)
+    toast('账号名称已更新 ✓')
+  } catch (e: any) { toast(e.message, 'err') }
+  savingName.value = false
+}
 
 async function changePassword() {
   if (changing.value) return
@@ -179,9 +196,18 @@ async function logout() {
     <div class="card mt16">
       <h3 class="section-title" style="margin-top:0">🔐 账号安全</h3>
       <p class="muted" style="font-size: 13.5px">
-        当前账号：<b>{{ auth.user?.username || 'admin' }}</b> · 支持多台设备同时登录；修改密码不会影响其他已登录设备。
+        支持多台设备同时登录；修改密码不会影响其他已登录设备。
       </p>
       <div class="form-grid mt16">
+        <div class="field full">
+          <label>账号名称</label>
+          <div class="name-row">
+            <input class="input" v-model.trim="username" maxlength="24" autocomplete="username" placeholder="2-24 个字符" />
+            <button class="btn" :disabled="savingName || !username.trim() || username.trim() === auth.user?.username" @click="saveUsername">
+              {{ savingName ? '保存中…' : '保存名称' }}
+            </button>
+          </div>
+        </div>
         <div class="field">
           <label>当前密码</label>
           <input class="input" type="password" v-model="pwd.old" autocomplete="current-password" placeholder="请输入当前密码" />
@@ -228,6 +254,9 @@ async function logout() {
 <style scoped>
 .data-ops { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
 .acct-ops { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
+.name-row { display: flex; gap: 8px; }
+.name-row .input { flex: 1; min-width: 0; }
+.name-row .btn { flex-shrink: 0; }
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
 @media (max-width: 480px) { .theme-grid { grid-template-columns: 1fr; } }
 .theme-card {

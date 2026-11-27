@@ -216,6 +216,24 @@ api.post('/auth/password', (req, res) => {
   res.json({ ok: true })
 })
 
+// 修改账号名称（登录用户名）
+api.post('/auth/username', (req, res) => {
+  const username = String(req.body?.username || '').trim()
+  if (username.length < 2 || username.length > 24) {
+    return res.status(400).json({ error: '账号名称需为 2-24 个字符' })
+  }
+  if (!/^[\w\u4e00-\u9fa5.@-]+$/.test(username)) {
+    return res.status(400).json({ error: '账号名称只能包含中文、字母、数字及 _ . @ -' })
+  }
+  const exists = findUserByName(username)
+  if (exists && exists.id !== req.user.id) {
+    return res.status(400).json({ error: '该账号名称已被使用' })
+  }
+  db.prepare('UPDATE users SET username = ?, updated_at = ? WHERE id = ?')
+    .run(username, new Date().toISOString(), req.user.id)
+  res.json({ user: { id: req.user.id, username } })
+})
+
 // 获取分享令牌（首次调用时生成）
 api.get('/share-link', (_req, res) => {
   res.json({ token: ensureShareToken() })

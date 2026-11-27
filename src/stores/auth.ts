@@ -28,6 +28,11 @@ export const useAuthStore = defineStore('auth', {
       this.checked = true
       return r.user
     },
+    async updateUsername(username: string) {
+      const r = await api.post<{ user: AuthUser }>('/auth/username', { username })
+      this.user = r.user
+      return r.user
+    },
     async logout() {
       try {
         await api.post('/auth/logout')

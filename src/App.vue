@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useAuthStore } from './stores/auth'
-import { NAV_ITEMS, TAB_ITEMS } from './router'
+import { NAV_ITEMS, TAB_ROWS } from './router'
 import { api, toast } from './api/client'
 import UiModal from './components/UiModal.vue'
 import { applyTheme, currentTheme, THEME_LABEL, THEME_ORDER, type ThemeName } from './theme'
@@ -119,9 +119,11 @@ async function copyShare() {
   </main>
 
   <nav class="tabbar" v-if="!isBlank">
-    <router-link v-for="it in TAB_ITEMS" :key="it.path" :to="it.path">
-      <span class="ico">{{ it.icon }}</span>{{ it.title }}
-    </router-link>
+    <div class="tab-row" v-for="(row, ri) in TAB_ROWS" :key="ri">
+      <router-link v-for="it in row" :key="it.path" :to="it.path">
+        <span class="ico">{{ it.icon }}</span>{{ it.title }}
+      </router-link>
+    </div>
   </nav>
 
   <UiModal :open="shareOpen" title="分享备婚计划" @close="shareOpen = false">
