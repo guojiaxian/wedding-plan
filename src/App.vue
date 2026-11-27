@@ -4,6 +4,8 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
 import { useAuthStore } from './stores/auth'
 import { NAV_ITEMS, TAB_ITEMS } from './router'
+import { api, toast } from './api/client'
+import UiModal from './components/UiModal.vue'
 import { applyTheme, currentTheme, THEME_LABEL, THEME_ORDER, type ThemeName } from './theme'
 
 const store = useAppStore()
@@ -32,6 +34,43 @@ const countdownText = computed(() => {
   if (countdown.value === 0) return '今天大喜 🎉'
   return '新婚快乐'
 })
+
+// ---------- 只读分享链接 ----------
+const shareOpen = ref(false)
+const shareLink = ref('')
+const shareLoading = ref(false)
+const shareInput = ref<HTMLInputElement>()
+
+async function openShare() {
+  shareOpen.value = true
+  if (shareLink.value) return
+  shareLoading.value = true
+  try {
+    const r = await api.get<{ token: string }>('/share-link')
+    shareLink.value = `${location.origin}/share/${r.token}`
+  } catch (e: any) {
+    toast(e.message, 'err')
+    shareOpen.value = false
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+async function copyShare() {
+  if (!shareLink.value) return
+  try {
+    await navigator.clipboard.writeText(shareLink.value)
+    toast('分享链接已复制 ✓')
+  } catch {
+    try {
+      shareInput.value?.select()
+      document.execCommand('copy')
+      toast('分享链接已复制 ✓')
+    } catch {
+      toast('复制失败，请长按链接手动复制', 'err')
+    }
+  }
+}
 </script>
 
 <template>
@@ -56,6 +95,7 @@ const countdownText = computed(() => {
       <div class="n" style="font-size:20px">📅</div>
       <div class="t">婚期待定 · 点击设置</div>
     </router-link>
+    <button class="theme-btn" @click="openShare">🔗 分享给家人</button>
     <button class="theme-btn" @click="toggleTheme">🎨 主题：{{ THEME_LABEL[theme] }}</button>
   </aside>
 
@@ -63,6 +103,7 @@ const countdownText = computed(() => {
     <div class="title"><span>💒</span>{{ pageTitle }}</div>
     <div class="topbar-right">
       <router-link to="/settings" class="countdown-chip">{{ countdownText }}</router-link>
+      <button class="theme-chip" title="分享只读链接" @click="openShare">🔗</button>
       <button class="theme-chip" title="切换主题" @click="toggleTheme">🎨</button>
     </div>
   </div>
@@ -82,4 +123,26 @@ const countdownText = computed(() => {
       <span class="ico">{{ it.icon }}</span>{{ it.title }}
     </router-link>
   </nav>
+
+  <UiModal :open="shareOpen" title="分享备婚计划" @close="shareOpen = false">
+    <p class="share-tip muted">拿到链接的人<b>无需登录</b>即可查看全部备婚数据，页面只读、无法修改。请只分享给信任的家人。</p>
+    <div v-if="shareLoading" class="muted">正在生成链接…</div>
+    <input
+      v-else
+      ref="shareInput"
+      class="input share-link"
+      :value="shareLink"
+      readonly
+      @focus="($event.target as HTMLInputElement).select()"
+    />
+    <template #footer>
+      <button class="btn" @click="shareOpen = false">关闭</button>
+      <button class="btn btn-primary" :disabled="!shareLink" @click="copyShare">复制链接</button>
+    </template>
+  </UiModal>
 </template>
+
+<style scoped>
+.share-tip { font-size: 13px; line-height: 1.7; margin-bottom: 12px; }
+.share-link { font-size: 12.5px; color: var(--secondary); }
+</style>

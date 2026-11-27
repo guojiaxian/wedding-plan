@@ -2,6 +2,7 @@ import express from 'express'
 import path from 'node:path'
 import fs from 'node:fs'
 import os from 'node:os'
+import crypto from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import {
   db, listAll, getOne, pick, insertRow, updateRow, deleteRow,
@@ -131,7 +132,43 @@ api.post('/auth/login', (req, res) => {
   res.json({ user: { id: user.id, username: user.username } })
 })
 
-// 除登录外的所有 API 都需要有效会话
+// 分享链接：无登录、只读；令牌存于 meta 表，首次生成后保持不变
+function getShareToken() {
+  const row = db.prepare("SELECT value FROM meta WHERE key = 'share_token'").get()
+  return row?.value || ''
+}
+
+function ensureShareToken() {
+  let token = getShareToken()
+  if (!token) {
+    token = crypto.randomBytes(24).toString('hex')
+    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('share_token', ?)").run(token)
+  }
+  return token
+}
+
+// 公开只读快照（必须在鉴权中间件之前注册）
+api.get('/share/:token', (req, res) => {
+  const token = getShareToken()
+  if (!token || req.params.token !== token) {
+    return res.status(404).json({ error: '分享链接无效或已失效' })
+  }
+  res.json({
+    owner: db.prepare('SELECT username FROM users ORDER BY id LIMIT 1').get()?.username || 'admin',
+    settings: db.prepare('SELECT * FROM settings WHERE id = 1').get(),
+    summary: buildSummary(),
+    budgetCategories: listAll('budget_categories'),
+    itemCategories: listAll('item_categories'),
+    items: listAll('items'),
+    tasks: listAll('tasks'),
+    timeline: listAll('timeline_events'),
+    staff: listAll('staff', 'id'),
+    guests: listAll('guests', 'id'),
+    decorations: listDecorationsWithImages()
+  })
+})
+
+// 除登录、分享快照外的所有 API 都需要有效会话
 api.use((req, res, next) => {
   const token = readCookie(req, SESSION_COOKIE)
   const user = getSessionUser(token)
@@ -165,6 +202,11 @@ api.post('/auth/password', (req, res) => {
   }
   updatePassword(user.id, next)
   res.json({ ok: true })
+})
+
+// 获取分享令牌（首次调用时生成）
+api.get('/share-link', (_req, res) => {
+  res.json({ token: ensureShareToken() })
 })
 
 // ---------- 服务端输入净化（前端校验之外的最后一道防线） ----------
@@ -216,7 +258,7 @@ function sanitize(table, data) {
 
 // ---------- 现场布置参考图（自定义路由，优先于下方通用 CRUD 注册） ----------
 // 布置清单附带每项的参考图缩略图（不含原图 data，保持列表轻量；原图按 id 懒加载）
-api.get('/decorations', (_req, res) => {
+function listDecorationsWithImages() {
   const rows = listAll('decorations', SCHEMA.decorations.order)
   const imgs = db.prepare('SELECT id, decoration_id, name, thumb FROM decoration_images ORDER BY id').all()
   const byDeco = new Map()
@@ -224,8 +266,10 @@ api.get('/decorations', (_req, res) => {
     if (!byDeco.has(im.decoration_id)) byDeco.set(im.decoration_id, [])
     byDeco.get(im.decoration_id).push({ id: im.id, name: im.name, thumb: im.thumb })
   }
-  res.json(rows.map(r => ({ ...r, images: byDeco.get(r.id) || [] })))
-})
+  return rows.map(r => ({ ...r, images: byDeco.get(r.id) || [] }))
+}
+
+api.get('/decorations', (_req, res) => res.json(listDecorationsWithImages()))
 
 // 单张原图（点开大图时懒加载）
 api.get('/decoration-images/:id', (req, res) => {
@@ -288,7 +332,7 @@ api.put('/settings', (req, res) => {
 })
 
 // ---------- 仪表盘聚合 ----------
-api.get('/summary', (_req, res) => {
+function buildSummary() {
   const cats = listAll('budget_categories')
   const expenses = listAll('expenses', 'id DESC')
   const items = listAll('items')
@@ -322,7 +366,7 @@ api.get('/summary', (_req, res) => {
     giftTotal += Number(g.gift) || 0
   }
 
-  res.json({
+  return {
     budget: {
       totalBudget: db.prepare('SELECT total_budget FROM settings WHERE id=1').get().total_budget || 0,
       totalSpent,
@@ -346,8 +390,10 @@ api.get('/summary', (_req, res) => {
       .filter(t => t.status !== 'done')
       .sort((a, b) => (a.due_date || '9999') < (b.due_date || '9999') ? -1 : 1)
       .slice(0, 5)
-  })
-})
+  }
+}
+
+api.get('/summary', (_req, res) => res.json(buildSummary()))
 
 // ---------- 备份 / 恢复 ----------
 const ALL_TABLES = ['settings', ...Object.values(SCHEMA).map(c => c.table)]

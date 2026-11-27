@@ -32,6 +32,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', blank: true } },
+    { path: '/share/:token', component: () => import('../views/ShareView.vue'), meta: { title: '备婚分享', blank: true, public: true } },
     { path: '/', component: () => import('../views/DashboardView.vue'), meta: { title: '备婚首页' } },
     { path: '/budget', component: () => import('../views/BudgetView.vue'), meta: { title: '花销规划' } },
     { path: '/items', component: () => import('../views/ItemsView.vue'), meta: { title: '物品清单' } },
@@ -48,9 +49,11 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // 只读分享页无需登录，也不应因已登录而被拦截
+  if (to.meta.public) return true
   const auth = useAuthStore()
   if (!auth.checked) await auth.fetchMe()
-  if (to.meta.blank) return auth.user ? { path: '/' } : true
+  if (to.path === '/login') return auth.user ? { path: '/' } : true
   if (!auth.user) {
     return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
   }

@@ -2,7 +2,8 @@ import crypto from 'node:crypto'
 import { db } from './db.js'
 
 export const SESSION_COOKIE = 'wp_sid'
-const SESSION_DAYS = 30
+// 会话永久有效：数据库不设过期；浏览器 Cookie 上限约 400 天
+const SESSION_DAYS = 400
 export const SESSION_MAX_AGE_MS = SESSION_DAYS * 86400000
 
 function sha256(value) {
@@ -46,29 +47,23 @@ export function findUserById(id) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id)
 }
 
-// 每次登录生成独立会话，同一账号可同时登录多台设备
+// 每次登录生成独立会话，同一账号可同时登录多台设备；会话永久有效（仅手动退出时销毁）
 export function createSession(userId) {
   const token = crypto.randomBytes(32).toString('hex')
   const now = Date.now()
-  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(now)
   db.prepare('INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)')
-    .run(sha256(token), userId, now, now + SESSION_MAX_AGE_MS)
+    .run(sha256(token), userId, now, 0)
   return token
 }
 
 export function getSessionUser(token) {
   if (!token) return null
-  const tokenHash = sha256(token)
   const row = db.prepare(`
-    SELECT s.expires_at, u.id, u.username
+    SELECT u.id, u.username
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
-  `).get(tokenHash)
+  `).get(sha256(token))
   if (!row) return null
-  if (Number(row.expires_at) < Date.now()) {
-    db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(tokenHash)
-    return null
-  }
   return { id: row.id, username: row.username }
 }
 
