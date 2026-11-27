@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 
 const mode = ref<'login' | 'register'>('login')
-const username = ref(localStorage.getItem('wp_last_username') || '')
+const username = ref('')
 const password = ref('')
 const confirm = ref('')
 const error = ref('')
@@ -41,11 +41,9 @@ async function submit() {
       : '/'
     if (mode.value === 'register') {
       await auth.register(username.value.trim(), password.value)
-      localStorage.setItem('wp_last_username', username.value.trim())
       router.replace('/welcome')
     } else {
       const user = await auth.login(username.value.trim(), password.value)
-      localStorage.setItem('wp_last_username', username.value.trim())
       router.replace(user.onboarded ? target : '/welcome')
     }
   } catch (e: any) {
