@@ -35,6 +35,7 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', blank: true } },
+    { path: '/welcome', component: () => import('../views/OnboardingView.vue'), meta: { title: '开始使用', blank: true } },
     { path: '/share/:token', component: () => import('../views/ShareView.vue'), meta: { title: '备婚分享', blank: true, public: true } },
     { path: '/', component: () => import('../views/DashboardView.vue'), meta: { title: '备婚首页' } },
     { path: '/budget', component: () => import('../views/BudgetView.vue'), meta: { title: '花销规划' } },
@@ -55,10 +56,16 @@ router.beforeEach(async (to) => {
   if (to.meta.public) return true
   const auth = useAuthStore()
   if (!auth.checked) await auth.fetchMe()
-  if (to.path === '/login') return auth.user ? { path: '/' } : true
+  if (to.path === '/login') {
+    if (!auth.user) return true
+    return auth.user.onboarded ? { path: '/' } : { path: '/welcome' }
+  }
   if (!auth.user) {
     return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
   }
+  // 新注册账号先完成基础设置（可跳过）
+  if (!auth.user.onboarded && to.path !== '/welcome') return { path: '/welcome' }
+  if (auth.user.onboarded && to.path === '/welcome') return { path: '/' }
   return true
 })
 

@@ -123,7 +123,6 @@ async function saveUsername() {
 async function changePassword() {
   if (changing.value) return
   if (!pwd.old || !pwd.next) return toast('请填写当前密码和新密码', 'err')
-  if (pwd.next.length < 6) return toast('新密码至少 6 位', 'err')
   if (pwd.next !== pwd.confirm) return toast('两次输入的新密码不一致', 'err')
   changing.value = true
   try {
@@ -247,7 +246,7 @@ async function saveShareSettings() {
           <input class="input" type="password" v-model="pwd.old" autocomplete="current-password" placeholder="请输入当前密码" />
         </div>
         <div class="field">
-          <label>新密码（6-64 位）</label>
+          <label>新密码（长度不限）</label>
           <input class="input" type="password" v-model="pwd.next" autocomplete="new-password" placeholder="请输入新密码" />
         </div>
         <div class="field full">

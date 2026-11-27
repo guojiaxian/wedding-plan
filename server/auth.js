@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { db } from './db.js'
+import { db, initUserData } from './db.js'
 
 export const SESSION_COOKIE = 'wp_sid'
 // 会话永久有效：数据库不设过期；浏览器 Cookie 上限约 400 天
@@ -34,9 +34,24 @@ export function ensureAdminUser() {
   if (db.prepare('SELECT id FROM users LIMIT 1').get()) return
   const now = new Date().toISOString()
   const password = process.env.ADMIN_PASSWORD || 'admin123'
-  db.prepare('INSERT INTO users (username, password_hash, created_at, updated_at) VALUES (?,?,?,?)')
+  const info = db.prepare('INSERT INTO users (username, password_hash, onboarded, created_at, updated_at) VALUES (?,?,1,?,?)')
     .run('admin', hashPassword(password), now, now)
+  initUserData(Number(info.lastInsertRowid))
   console.log('已创建默认账号 admin（未配置 ADMIN_PASSWORD 时初始密码为 admin123，请登录后修改）')
+}
+
+// 注册新账号：首个账号标记为已完成引导，并初始化自己的空数据
+export function createUser(username, password) {
+  const now = new Date().toISOString()
+  const info = db.prepare('INSERT INTO users (username, password_hash, onboarded, created_at, updated_at) VALUES (?,?,0,?,?)')
+    .run(username, hashPassword(password), now, now)
+  const id = Number(info.lastInsertRowid)
+  initUserData(id)
+  return { id, username, onboarded: false }
+}
+
+export function setOnboarded(userId) {
+  db.prepare('UPDATE users SET onboarded = 1 WHERE id = ?').run(userId)
 }
 
 export function findUserByName(username) {
@@ -59,12 +74,12 @@ export function createSession(userId) {
 export function getSessionUser(token) {
   if (!token) return null
   const row = db.prepare(`
-    SELECT u.id, u.username
+    SELECT u.id, u.username, u.onboarded
     FROM sessions s JOIN users u ON u.id = s.user_id
     WHERE s.token_hash = ?
   `).get(sha256(token))
   if (!row) return null
-  return { id: row.id, username: row.username }
+  return { id: row.id, username: row.username, onboarded: !!row.onboarded }
 }
 
 export function destroySession(token) {

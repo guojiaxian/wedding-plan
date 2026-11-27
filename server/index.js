@@ -11,7 +11,8 @@ import {
 } from './db.js'
 import {
   SESSION_COOKIE, SESSION_MAX_AGE_MS, ensureAdminUser, createSession, getSessionUser,
-  destroySession, findUserByName, findUserById, verifyPassword, updatePassword
+  destroySession, findUserByName, findUserById, verifyPassword, updatePassword,
+  createUser, setOnboarded
 } from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -116,6 +117,15 @@ function readCookie(req, name) {
   return ''
 }
 
+function normalizeUsername(raw) {
+  const username = String(raw || '').trim()
+  if (username.length < 2 || username.length > 24) return { error: '账号名称需为 2-24 个字符' }
+  if (!/^[\w\u4e00-\u9fa5.@-]+$/.test(username)) {
+    return { error: '账号名称支持中文、字母、数字及 _ . @ -' }
+  }
+  return { username }
+}
+
 api.post('/auth/login', (req, res) => {
   const { username, password } = req.body || {}
   const user = findUserByName(username)
@@ -129,23 +139,37 @@ api.post('/auth/login', (req, res) => {
     path: '/',
     maxAge: SESSION_MAX_AGE_MS
   })
-  res.json({ user: { id: user.id, username: user.username } })
+  res.json({ user: { id: user.id, username: user.username, onboarded: !!user.onboarded } })
 })
 
-// 分享链接：无登录、只读；令牌存于 meta 表，首次生成后保持不变
+// 注册新账号：密码长度不限（非空即可）
+api.post('/auth/register', (req, res) => {
+  const { password } = req.body || {}
+  const check = normalizeUsername(req.body?.username)
+  if (check.error) return res.status(400).json({ error: check.error })
+  const pwd = String(password ?? '')
+  if (!pwd) return res.status(400).json({ error: '请输入密码' })
+  if (findUserByName(check.username)) {
+    return res.status(400).json({ error: '该账号名称已被使用' })
+  }
+  const user = createUser(check.username, pwd)
+  const token = createSession(user.id)
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_MAX_AGE_MS
+  })
+  res.json({ user })
+})
+
+// 分享链接：无登录、只读；令牌存于 users 表，每个账号独立
 const SHARE_SECTIONS = ['overview', 'budget', 'items', 'tasks', 'timeline', 'decorations', 'seats', 'staff', 'guests']
 
-function getShareToken() {
-  const row = db.prepare("SELECT value FROM meta WHERE key = 'share_token'").get()
-  return row?.value || ''
-}
-
-// 分享栏目开关：未设置时默认全部展示
-function getShareSections() {
-  const row = db.prepare("SELECT value FROM meta WHERE key = 'share_sections'").get()
-  if (!row) return [...SHARE_SECTIONS]
+function parseShareSections(raw) {
+  if (!raw) return [...SHARE_SECTIONS]
   try {
-    const list = JSON.parse(row.value)
+    const list = JSON.parse(raw)
     const valid = SHARE_SECTIONS.filter(k => Array.isArray(list) && list.includes(k))
     return valid.length ? valid : [...SHARE_SECTIONS]
   } catch {
@@ -153,50 +177,64 @@ function getShareSections() {
   }
 }
 
-function ensureShareToken() {
-  let token = getShareToken()
+function getShareToken(userId) {
+  return db.prepare('SELECT share_token FROM users WHERE id = ?').get(userId)?.share_token || ''
+}
+
+function getShareSections(userId) {
+  return parseShareSections(db.prepare('SELECT share_sections FROM users WHERE id = ?').get(userId)?.share_sections)
+}
+
+function ensureShareToken(userId) {
+  let token = getShareToken(userId)
   if (!token) {
     token = crypto.randomBytes(24).toString('hex')
-    db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('share_token', ?)").run(token)
+    db.prepare('UPDATE users SET share_token = ? WHERE id = ?').run(token, userId)
   }
   return token
 }
 
+function getSettings(userId) {
+  db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(userId)
+  return db.prepare('SELECT * FROM user_settings WHERE user_id = ?').get(userId)
+}
+
 // 公开只读快照（必须在鉴权中间件之前注册）
 api.get('/share/:token', (req, res) => {
-  const token = getShareToken()
-  if (!token || req.params.token !== token) {
+  const owner = db.prepare('SELECT id, username, share_sections FROM users WHERE share_token = ?').get(req.params.token)
+  if (!owner) {
     return res.status(404).json({ error: '分享链接无效或已失效' })
   }
-  const sections = getShareSections()
+  const sections = parseShareSections(owner.share_sections)
   const has = k => sections.includes(k)
+  const uid = owner.id
   res.json({
-    owner: db.prepare('SELECT username FROM users ORDER BY id LIMIT 1').get()?.username || 'admin',
-    settings: db.prepare('SELECT * FROM settings WHERE id = 1').get(),
+    owner: owner.username,
+    settings: getSettings(uid),
     sections,
-    summary: buildSummary(),
-    budgetCategories: has('budget') ? listAll('budget_categories') : [],
-    itemCategories: has('items') ? listAll('item_categories') : [],
-    items: has('items') ? listAll('items') : [],
-    expenses: has('budget') ? listAll('expenses', 'id DESC') : [],
-    tasks: has('tasks') ? listAll('tasks') : [],
-    timeline: has('timeline') ? listAll('timeline_events') : [],
-    staff: has('staff') ? listAll('staff', 'id') : [],
-    guests: has('guests') || has('seats') ? listAll('guests', 'id') : [],
-    decorations: has('decorations') ? listDecorationsWithImages() : []
+    summary: buildSummary(uid),
+    budgetCategories: has('budget') ? listAll('budget_categories', 'sort, id', uid) : [],
+    itemCategories: has('items') ? listAll('item_categories', 'sort, id', uid) : [],
+    items: has('items') ? listAll('items', 'sort, id', uid) : [],
+    expenses: has('budget') ? listAll('expenses', 'id DESC', uid) : [],
+    tasks: has('tasks') ? listAll('tasks', 'sort, id', uid) : [],
+    timeline: has('timeline') ? listAll('timeline_events', 'sort, id', uid) : [],
+    staff: has('staff') ? listAll('staff', 'id', uid) : [],
+    guests: has('guests') || has('seats') ? listAll('guests', 'id', uid) : [],
+    decorations: has('decorations') ? listDecorationsWithImages(uid) : []
   })
 })
 
 // 分享页按需加载参考图原图（同样凭分享令牌访问；未开放布置栏目时不可访问）
 api.get('/share/:token/images/:id', (req, res) => {
-  const token = getShareToken()
-  if (!token || req.params.token !== token) {
+  const owner = db.prepare('SELECT id FROM users WHERE share_token = ?').get(req.params.token)
+  if (!owner) {
     return res.status(404).json({ error: '分享链接无效或已失效' })
   }
-  if (!getShareSections().includes('decorations')) {
+  if (!getShareSections(owner.id).includes('decorations')) {
     return res.status(404).json({ error: '该栏目未开放' })
   }
-  const row = getOne('decoration_images', req.params.id)
+  const row = getOne('decoration_images', req.params.id, owner.id)
   if (!row) return res.status(404).json({ error: '图片不存在' })
   res.json(row)
 })
@@ -219,16 +257,16 @@ api.post('/auth/logout', (req, res) => {
   res.json({ ok: true })
 })
 
-// 修改密码：保持其他设备已登录状态（多人共享同一账号）
+// 修改密码：保持其他设备已登录状态（密码长度不限）
 api.post('/auth/password', (req, res) => {
   const { oldPassword, newPassword } = req.body || {}
   const user = findUserById(req.user.id)
   if (!user || !verifyPassword(oldPassword, user.password_hash)) {
     return res.status(400).json({ error: '当前密码不正确' })
   }
-  const next = String(newPassword || '')
-  if (next.length < 6 || next.length > 64) {
-    return res.status(400).json({ error: '新密码长度需为 6-64 位' })
+  const next = String(newPassword ?? '')
+  if (!next) {
+    return res.status(400).json({ error: '请输入新密码' })
   }
   if (next === String(oldPassword)) {
     return res.status(400).json({ error: '新密码不能与当前密码相同' })
@@ -239,30 +277,41 @@ api.post('/auth/password', (req, res) => {
 
 // 修改账号名称（登录用户名）
 api.post('/auth/username', (req, res) => {
-  const username = String(req.body?.username || '').trim()
-  if (username.length < 2 || username.length > 24) {
-    return res.status(400).json({ error: '账号名称需为 2-24 个字符' })
-  }
-  if (!/^[\w\u4e00-\u9fa5.@-]+$/.test(username)) {
-    return res.status(400).json({ error: '账号名称支持中文、字母、数字及 _ . @ -' })
-  }
-  const exists = findUserByName(username)
+  const check = normalizeUsername(req.body?.username)
+  if (check.error) return res.status(400).json({ error: check.error })
+  const exists = findUserByName(check.username)
   if (exists && exists.id !== req.user.id) {
     return res.status(400).json({ error: '该账号名称已被使用' })
   }
   db.prepare('UPDATE users SET username = ?, updated_at = ? WHERE id = ?')
-    .run(username, new Date().toISOString(), req.user.id)
-  res.json({ user: { id: req.user.id, username } })
+    .run(check.username, new Date().toISOString(), req.user.id)
+  res.json({ user: { ...req.user, username: check.username } })
+})
+
+// 首次注册后的基础设置（可跳过）
+api.post('/auth/onboarding', (req, res) => {
+  const skip = !!req.body?.skip
+  if (!skip) {
+    const current = getSettings(req.user.id)
+    const data = {
+      ...current,
+      ...sanitize('settings', pick(req.body?.settings || {}, ['groom_name', 'bride_name', 'wedding_date', 'venue', 'total_budget']))
+    }
+    db.prepare(`UPDATE user_settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE user_id=?`)
+      .run(data.groom_name || '', data.bride_name || '', data.wedding_date || '', data.venue || '', Number(data.total_budget) || 0, req.user.id)
+  }
+  setOnboarded(req.user.id)
+  res.json({ user: { ...req.user, onboarded: true } })
 })
 
 // 获取分享令牌（首次调用时生成）
-api.get('/share-link', (_req, res) => {
-  res.json({ token: ensureShareToken() })
+api.get('/share-link', (req, res) => {
+  res.json({ token: ensureShareToken(req.user.id) })
 })
 
 // 分享栏目设置
-api.get('/share-settings', (_req, res) => {
-  res.json({ sections: getShareSections() })
+api.get('/share-settings', (req, res) => {
+  res.json({ sections: getShareSections(req.user.id) })
 })
 
 api.put('/share-settings', (req, res) => {
@@ -271,7 +320,7 @@ api.put('/share-settings', (req, res) => {
   if (!sections.length) {
     return res.status(400).json({ error: '至少保留一个分享栏目' })
   }
-  db.prepare("INSERT OR REPLACE INTO meta (key, value) VALUES ('share_sections', ?)").run(JSON.stringify(sections))
+  db.prepare('UPDATE users SET share_sections = ? WHERE id = ?').run(JSON.stringify(sections), req.user.id)
   res.json({ sections })
 })
 
@@ -324,9 +373,9 @@ function sanitize(table, data) {
 
 // ---------- 现场布置参考图（自定义路由，优先于下方通用 CRUD 注册） ----------
 // 布置清单附带每项的参考图缩略图（不含原图 data，保持列表轻量；原图按 id 懒加载）
-function listDecorationsWithImages() {
-  const rows = listAll('decorations', SCHEMA.decorations.order)
-  const imgs = db.prepare('SELECT id, decoration_id, name, thumb FROM decoration_images ORDER BY id').all()
+function listDecorationsWithImages(userId) {
+  const rows = listAll('decorations', SCHEMA.decorations.order, userId)
+  const imgs = db.prepare('SELECT id, decoration_id, name, thumb FROM decoration_images WHERE user_id = ? ORDER BY id').all(userId)
   const byDeco = new Map()
   for (const im of imgs) {
     if (!byDeco.has(im.decoration_id)) byDeco.set(im.decoration_id, [])
@@ -335,18 +384,18 @@ function listDecorationsWithImages() {
   return rows.map(r => ({ ...r, images: byDeco.get(r.id) || [] }))
 }
 
-api.get('/decorations', (_req, res) => res.json(listDecorationsWithImages()))
+api.get('/decorations', (req, res) => res.json(listDecorationsWithImages(req.user.id)))
 
 // 单张原图（点开大图时懒加载）
 api.get('/decoration-images/:id', (req, res) => {
-  const row = getOne('decoration_images', req.params.id)
+  const row = getOne('decoration_images', req.params.id, req.user.id)
   if (!row) return res.status(404).json({ error: '图片不存在' })
   res.json(row)
 })
 
-// 通用 CRUD
+// 通用 CRUD（全部按当前账号隔离）
 for (const [route, conf] of Object.entries(SCHEMA)) {
-  api.get(`/${route}`, (_req, res) => res.json(listAll(conf.table, conf.order)))
+  api.get(`/${route}`, (req, res) => res.json(listAll(conf.table, conf.order, req.user.id)))
 
   api.post(`/${route}`, (req, res) => {
     try {
@@ -358,50 +407,53 @@ for (const [route, conf] of Object.entries(SCHEMA)) {
       // 参考图必须挂在已存在的布置项上，且带有效图片数据
       if (conf.table === 'decoration_images') {
         data.decoration_id = Number(data.decoration_id) || 0
-        if (!getOne('decorations', data.decoration_id)) return res.status(400).json({ error: '布置项不存在' })
+        if (!getOne('decorations', data.decoration_id, req.user.id)) return res.status(400).json({ error: '布置项不存在' })
         if (!data.data) return res.status(400).json({ error: '图片数据为空' })
       }
-      res.json(insertRow(conf.table, conf.fields, data))
+      res.json(insertRow(conf.table, conf.fields, data, req.user.id))
     } catch (e) { res.status(400).json({ error: e.message }) }
   })
 
   api.put(`/${route}/:id`, (req, res) => {
-    const row = getOne(conf.table, req.params.id)
+    const row = getOne(conf.table, req.params.id, req.user.id)
     if (!row) return res.status(404).json({ error: '记录不存在' })
-    res.json(updateRow(conf.table, conf.fields, req.params.id, sanitize(conf.table, pick(req.body, conf.fields))))
+    res.json(updateRow(conf.table, conf.fields, req.params.id, sanitize(conf.table, pick(req.body, conf.fields)), req.user.id))
   })
 
   api.delete(`/${route}/:id`, (req, res) => {
     // 删除物品分类时，可将该分类下的物品迁移到另一分类（?moveTo=<key>）；至少保留一个分类
     if (conf.table === 'item_categories') {
-      const total = Number(db.prepare('SELECT COUNT(*) AS n FROM item_categories').get().n)
+      const total = Number(db.prepare('SELECT COUNT(*) AS n FROM item_categories WHERE user_id = ?').get(req.user.id).n)
       if (total <= 1) return res.status(400).json({ error: '至少保留一个物品分类' })
-      const row = getOne('item_categories', req.params.id)
+      const row = getOne('item_categories', req.params.id, req.user.id)
       const moveTo = String(req.query.moveTo || '')
-      if (row && moveTo) db.prepare('UPDATE items SET category = ? WHERE category = ?').run(moveTo, row.key)
+      if (row && moveTo) db.prepare('UPDATE items SET category = ? WHERE category = ? AND user_id = ?').run(moveTo, row.key, req.user.id)
     }
     // 删除布置项时级联清理其参考图
     if (conf.table === 'decorations') {
-      db.prepare('DELETE FROM decoration_images WHERE decoration_id = ?').run(req.params.id)
+      db.prepare('DELETE FROM decoration_images WHERE decoration_id = ? AND user_id = ?').run(req.params.id, req.user.id)
     }
-    deleteRow(conf.table, req.params.id)
+    deleteRow(conf.table, req.params.id, req.user.id)
     res.json({ ok: true })
   })
 }
 
 // ---------- 设置 ----------
-api.get('/settings', (_req, res) => res.json(db.prepare('SELECT * FROM settings WHERE id = 1').get()))
+api.get('/settings', (req, res) => res.json(getSettings(req.user.id)))
 api.put('/settings', (req, res) => {
   const data = sanitize('settings', pick(req.body, ['groom_name', 'bride_name', 'wedding_date', 'venue', 'total_budget']))
-  updateRow('settings', ['groom_name', 'bride_name', 'wedding_date', 'venue', 'total_budget'], 1, data)
-  res.json(db.prepare('SELECT * FROM settings WHERE id = 1').get())
+  const current = getSettings(req.user.id)
+  const merged = { ...current, ...data }
+  db.prepare(`UPDATE user_settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE user_id=?`)
+    .run(merged.groom_name || '', merged.bride_name || '', merged.wedding_date || '', merged.venue || '', Number(merged.total_budget) || 0, req.user.id)
+  res.json(getSettings(req.user.id))
 })
 
 // ---------- 仪表盘聚合 ----------
-function buildSummary() {
-  const cats = listAll('budget_categories')
-  const expenses = listAll('expenses', 'id DESC')
-  const items = listAll('items')
+function buildSummary(userId) {
+  const cats = listAll('budget_categories', 'sort, id', userId)
+  const expenses = listAll('expenses', 'id DESC', userId)
+  const items = listAll('items', 'sort, id', userId)
 
   // 已付口径：花销项「已付」累计 + 已购物品自动计入（仅限挂在现存花销分类上的物品）
   // 分类被删后物品不再计入任何花销；expenses 表仅余未分类记录（一并计入总数）
@@ -418,9 +470,9 @@ function buildSummary() {
     + items.filter(i => i.purchased && catIds.has(i.budget_category_id)).reduce((s, i) => s + (i.actual_price ?? i.estimated_price ?? 0), 0)
     + expenses.filter(e => e.category_id == null).reduce((s, e) => s + (e.amount || 0), 0)
 
-  const tasks = listAll('tasks')
-  const guests = listAll('guests', 'id')
-  const decorations = listAll('decorations')
+  const tasks = listAll('tasks', 'sort, id', userId)
+  const guests = listAll('guests', 'id', userId)
+  const decorations = listAll('decorations', 'sort, id', userId)
 
   const rsvpCount = { pending: 0, yes: 0, no: 0 }
   let confirmedHeads = 0, invitedHeads = 0, giftTotal = 0
@@ -434,7 +486,7 @@ function buildSummary() {
 
   return {
     budget: {
-      totalBudget: db.prepare('SELECT total_budget FROM settings WHERE id=1').get().total_budget || 0,
+      totalBudget: Number(getSettings(userId).total_budget) || 0,
       totalSpent,
       categories: cats.map(c => ({ ...c, spent: catSpent[c.id] || 0 }))
     },
@@ -459,14 +511,19 @@ function buildSummary() {
   }
 }
 
-api.get('/summary', (_req, res) => res.json(buildSummary()))
+api.get('/summary', (req, res) => res.json(buildSummary(req.user.id)))
 
 // ---------- 备份 / 恢复 ----------
-const ALL_TABLES = ['settings', ...Object.values(SCHEMA).map(c => c.table)]
 
-api.get('/backup', (_req, res) => {
+api.get('/backup', (req, res) => {
+  const uid = req.user.id
+  const stripUser = ({ user_id, ...rest }) => rest
   const data = { app: 'wedding-plan', version: 1, exportedAt: new Date().toISOString() }
-  for (const t of ALL_TABLES) data[t] = db.prepare(`SELECT * FROM ${t}`).all()
+  const settings = getSettings(uid)
+  data.settings = [{ ...stripUser(settings), id: 1 }]
+  for (const conf of Object.values(SCHEMA)) {
+    data[conf.table] = db.prepare(`SELECT * FROM ${conf.table} WHERE user_id = ? ORDER BY id`).all(uid).map(stripUser)
+  }
   res.setHeader('Content-Disposition', `attachment; filename="wedding-backup-${Date.now()}.json"`)
   res.json(data)
 })
@@ -474,12 +531,16 @@ api.get('/backup', (_req, res) => {
 api.post('/backup', (req, res) => {
   const data = req.body
   if (!data || typeof data !== 'object') return res.status(400).json({ error: '无效的备份文件' })
+  const uid = req.user.id
   db.exec('BEGIN')
   try {
-    clearData()
+    clearData(uid)
+    getSettings(uid)
     const s = data.settings?.[0]
-    if (s) db.prepare('UPDATE settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE id=1')
-      .run(s.groom_name || '', s.bride_name || '', s.wedding_date || '', s.venue || '', numGE0(s.total_budget))
+    if (s) {
+      db.prepare('UPDATE user_settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE user_id=?')
+        .run(s.groom_name || '', s.bride_name || '', s.wedding_date || '', s.venue || '', numGE0(s.total_budget), uid)
+    }
     // 兼容旧版备份：缺少的表按空数组处理
     const decoIdMap = {} // 参考图重映射：备份里的布置项 id → 恢复后的新 id
     for (const [route, conf] of Object.entries(SCHEMA)) {
@@ -492,19 +553,19 @@ api.post('/backup', (req, res) => {
           clean.decoration_id = decoIdMap[clean.decoration_id] || 0
           if (!clean.decoration_id) continue
         }
-        const inserted = insertRow(conf.table, conf.fields, clean)
+        const inserted = insertRow(conf.table, conf.fields, clean, uid)
         if (conf.table === 'decorations') decoIdMap[row.id] = inserted.id
       }
     }
     // 旧版备份把付款逐笔存在 expenses：折算进对应花销项「已付」后清除（新版备份已含 paid，折算为零增量）
-    db.exec(`
+    db.prepare(`
       UPDATE budget_categories SET paid = paid + (
         SELECT COALESCE(SUM(e.amount), 0) FROM expenses e WHERE e.category_id = budget_categories.id
-      );
-      DELETE FROM expenses WHERE category_id IS NOT NULL;
-    `)
+      ) WHERE user_id = ?
+    `).run(uid)
+    db.prepare('DELETE FROM expenses WHERE user_id = ? AND category_id IS NOT NULL').run(uid)
     db.exec('COMMIT')
-    migrateDecorationAreas() // 旧版备份可能仍是旧区域键（photo/ceremony），恢复后归一到新四区
+    migrateDecorationAreas(uid) // 旧版备份可能仍是旧区域键（photo/ceremony），恢复后归一到新四区
     res.json({ ok: true })
   } catch (e) {
     db.exec('ROLLBACK')
@@ -513,9 +574,9 @@ api.post('/backup', (req, res) => {
 })
 
 // ---------- 模板 ----------
-api.post('/seed/reset', (_req, res) => { seedTemplate(); res.json({ ok: true }) })
-api.post('/seed/clear', (_req, res) => { clearData(); res.json({ ok: true }) })
-api.post('/timeline/template', (_req, res) => { seedTimeline(); res.json({ ok: true }) })
+api.post('/seed/reset', (req, res) => { seedTemplate(req.user.id); res.json({ ok: true }) })
+api.post('/seed/clear', (req, res) => { clearData(req.user.id); res.json({ ok: true }) })
+api.post('/timeline/template', (req, res) => { seedTimeline(req.user.id); res.json({ ok: true }) })
 
 // 未知 API 路由返回 JSON 404（避免命中 SPA 回退返回 HTML 导致前端解析困惑）
 api.use((_req, res) => res.status(404).json({ error: '接口不存在' }))
@@ -547,16 +608,17 @@ function lanIPv4s() {
 }
 
 // 首次初始化：以 meta 表标记为准 —— 防止用户「清空数据」后重启服务时模板数据复活
-if (!isSeeded()) {
+const firstUserId = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()?.id
+if (!isSeeded() && firstUserId) {
   if (isEmpty()) {
-    seedTemplate()
+    seedTemplate(firstUserId)
     console.log('首次启动：已载入备婚模板数据')
   } else {
     markSeeded()
   }
 }
-// 现场布置区域归一（旧五区 → 新四区），幂等：仅在存在旧区域键时执行
-migrateDecorationAreas()
+// 现场布置区域归一（旧五区 → 新四区），幂等：逐账号执行，仅在存在旧区域键时修改
+for (const u of db.prepare('SELECT id FROM users').all()) migrateDecorationAreas(u.id)
 const server = app.listen(PORT, HOST, () => {
   console.log(`备婚计划服务已启动（监听 ${HOST}:${PORT}，数据独立存放于 server/data/）`)
   console.log(`  本机访问: http://localhost:${PORT}`)

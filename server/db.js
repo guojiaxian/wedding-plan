@@ -28,8 +28,19 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 INSERT OR IGNORE INTO settings (id) VALUES (1);
 
+-- 多账号：每个账号一份婚礼设置（旧版单行 settings 已迁移至此）
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id INTEGER PRIMARY KEY,
+  groom_name TEXT DEFAULT '',
+  bride_name TEXT DEFAULT '',
+  wedding_date TEXT DEFAULT '',
+  venue TEXT DEFAULT '',
+  total_budget REAL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS budget_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   name TEXT NOT NULL,
   budget REAL DEFAULT 0,
   sort INTEGER DEFAULT 0
@@ -37,6 +48,7 @@ CREATE TABLE IF NOT EXISTS budget_categories (
 
 CREATE TABLE IF NOT EXISTS expenses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   category_id INTEGER,
   name TEXT NOT NULL,
   amount REAL DEFAULT 0,
@@ -46,6 +58,7 @@ CREATE TABLE IF NOT EXISTS expenses (
 
 CREATE TABLE IF NOT EXISTS items (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   category TEXT NOT NULL DEFAULT 'other',
   name TEXT NOT NULL,
   budget_category_id INTEGER,
@@ -59,6 +72,7 @@ CREATE TABLE IF NOT EXISTS items (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   title TEXT NOT NULL,
   phase TEXT DEFAULT 'm6',
   due_date TEXT DEFAULT '',
@@ -70,6 +84,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE TABLE IF NOT EXISTS timeline_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   time TEXT DEFAULT '',
   title TEXT NOT NULL,
   duration TEXT DEFAULT '',
@@ -81,6 +96,7 @@ CREATE TABLE IF NOT EXISTS timeline_events (
 
 CREATE TABLE IF NOT EXISTS staff (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   name TEXT DEFAULT '',
   role TEXT DEFAULT '',
   phone TEXT DEFAULT '',
@@ -90,6 +106,7 @@ CREATE TABLE IF NOT EXISTS staff (
 
 CREATE TABLE IF NOT EXISTS guests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   name TEXT NOT NULL,
   side TEXT DEFAULT 'common',
   grp TEXT DEFAULT '',
@@ -104,14 +121,17 @@ CREATE TABLE IF NOT EXISTS guests (
 
 CREATE TABLE IF NOT EXISTS item_categories (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  key TEXT NOT NULL UNIQUE,
+  user_id INTEGER NOT NULL DEFAULT 1,
+  key TEXT NOT NULL,
   name TEXT NOT NULL,
   icon TEXT DEFAULT '📦',
-  sort INTEGER DEFAULT 0
+  sort INTEGER DEFAULT 0,
+  UNIQUE(user_id, key)
 );
 
 CREATE TABLE IF NOT EXISTS decorations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   area TEXT DEFAULT 'ceremony',
   name TEXT NOT NULL,
   done INTEGER DEFAULT 0,
@@ -123,17 +143,21 @@ CREATE TABLE IF NOT EXISTS decorations (
 -- 现场布置参考图：图片以 data URL 存于库内（随备份一起导出），原图 data + 列表用小缩略图 thumb
 CREATE TABLE IF NOT EXISTS decoration_images (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL DEFAULT 1,
   decoration_id INTEGER,
   name TEXT DEFAULT '',
   thumb TEXT DEFAULT '',
   data TEXT DEFAULT ''
 );
 
--- 登录账号：当前为单账号模式（admin），数据为全站共享
+-- 登录账号：支持多账号注册，每个账号的数据互相隔离
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  onboarded INTEGER NOT NULL DEFAULT 0,
+  share_token TEXT,
+  share_sections TEXT,
   created_at TEXT DEFAULT '',
   updated_at TEXT DEFAULT ''
 );
@@ -148,6 +172,73 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `)
+
+// ---------- 多账号数据隔离迁移（幂等） ----------
+function tableColumns(table) {
+  return db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name)
+}
+
+// 1) users 新列；旧库已有账号视为已完成引导
+const userCols = tableColumns('users')
+const hadOnboarded = userCols.includes('onboarded')
+if (!hadOnboarded) db.exec('ALTER TABLE users ADD COLUMN onboarded INTEGER NOT NULL DEFAULT 0')
+if (!userCols.includes('share_token')) db.exec('ALTER TABLE users ADD COLUMN share_token TEXT')
+if (!userCols.includes('share_sections')) db.exec('ALTER TABLE users ADD COLUMN share_sections TEXT')
+if (!hadOnboarded) db.exec('UPDATE users SET onboarded = 1')
+
+// 2) 旧单行 settings → user_settings（归第一个账号 admin）
+if (Number(db.prepare('SELECT COUNT(*) AS n FROM user_settings').get().n) === 0) {
+  const old = db.prepare('SELECT * FROM settings WHERE id = 1').get()
+  if (old) {
+    db.prepare(`INSERT OR IGNORE INTO user_settings (user_id, groom_name, bride_name, wedding_date, venue, total_budget)
+      VALUES (1, ?, ?, ?, ?, ?)`).run(
+      old.groom_name || '', old.bride_name || '', old.wedding_date || '', old.venue || '', old.total_budget || 0
+    )
+  }
+}
+
+// 3) 旧 meta 分享令牌/栏目归第一个账号
+const firstUser = db.prepare('SELECT id FROM users ORDER BY id LIMIT 1').get()
+if (firstUser) {
+  const st = db.prepare("SELECT value FROM meta WHERE key = 'share_token'").get()
+  if (st?.value) {
+    db.prepare("UPDATE users SET share_token = ? WHERE id = ? AND (share_token IS NULL OR share_token = '')").run(st.value, firstUser.id)
+  }
+  const ss = db.prepare("SELECT value FROM meta WHERE key = 'share_sections'").get()
+  if (ss?.value) {
+    db.prepare('UPDATE users SET share_sections = ? WHERE id = ? AND share_sections IS NULL').run(ss.value, firstUser.id)
+  }
+}
+
+// 4) 数据表补 user_id（旧数据归 admin）
+const USER_TABLES = ['budget_categories', 'expenses', 'items', 'tasks', 'timeline_events', 'staff', 'guests', 'decorations', 'decoration_images']
+for (const t of USER_TABLES) {
+  if (!tableColumns(t).includes('user_id')) {
+    db.exec(`ALTER TABLE ${t} ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1`)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_${t}_user ON ${t}(user_id)`)
+}
+
+// 5) item_categories：全局唯一 key → 每个账号内唯一
+if (!tableColumns('item_categories').includes('user_id')) {
+  db.exec(`
+    DROP TABLE IF EXISTS item_categories_new;
+    CREATE TABLE item_categories_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 1,
+      key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      icon TEXT DEFAULT '📦',
+      sort INTEGER DEFAULT 0,
+      UNIQUE(user_id, key)
+    );
+    INSERT INTO item_categories_new (id, user_id, key, name, icon, sort)
+      SELECT id, 1, key, name, icon, sort FROM item_categories;
+    DROP TABLE item_categories;
+    ALTER TABLE item_categories_new RENAME TO item_categories;
+  `)
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_item_categories_user ON item_categories(user_id)')
 
 // ---------- 迁移：花销项直接维护「已付」累计（付款不再逐笔记录/展示） ----------
 // 老库缺 paid 列时补列，并把既有按分类记录的支出折算进 paid 后移除（未分类支出保留原样）
@@ -169,38 +260,55 @@ try {
   throw e
 }
 
-// ---------- 通用 CRUD 辅助（表名/字段均为白名单，参数化查询） ----------
-export function listAll(table, orderBy = 'sort, id') {
-  return db.prepare(`SELECT * FROM ${table} ORDER BY ${orderBy}`).all()
+// ---------- 通用 CRUD 辅助（表名/字段均为白名单，参数化查询；按 user_id 隔离） ----------
+export function listAll(table, orderBy = 'sort, id', userId) {
+  if (userId == null) throw new Error('缺少 user_id')
+  return db.prepare(`SELECT * FROM ${table} WHERE user_id = ? ORDER BY ${orderBy}`).all(userId)
 }
-export function getOne(table, id) {
-  return db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id)
+export function getOne(table, id, userId) {
+  if (userId == null) throw new Error('缺少 user_id')
+  return db.prepare(`SELECT * FROM ${table} WHERE id = ? AND user_id = ?`).get(id, userId)
 }
 export function pick(body, fields) {
   const out = {}
   for (const f of fields) if (body && f in body) out[f] = body[f]
   return out
 }
-export function insertRow(table, fields, data) {
+export function insertRow(table, fields, data, userId) {
+  if (userId == null) throw new Error('缺少 user_id')
   const keys = Object.keys(data)
   if (!keys.length) throw new Error('没有可写入的字段')
-  const sql = `INSERT INTO ${table} (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`
-  const info = db.prepare(sql).run(...keys.map(k => data[k] ?? null))
-  return getOne(table, Number(info.lastInsertRowid))
+  const sql = `INSERT INTO ${table} (${keys.join(',')}, user_id) VALUES (${keys.map(() => '?').join(',')}, ?)`
+  const info = db.prepare(sql).run(...keys.map(k => data[k] ?? null), userId)
+  return getOne(table, Number(info.lastInsertRowid), userId)
 }
-export function updateRow(table, fields, id, data) {
+export function updateRow(table, fields, id, data, userId) {
+  if (userId == null) throw new Error('缺少 user_id')
   const keys = Object.keys(data).filter(k => fields.includes(k))
-  if (!keys.length) return getOne(table, id)
-  const sql = `UPDATE ${table} SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE id = ?`
-  db.prepare(sql).run(...keys.map(k => data[k] ?? null), id)
-  return getOne(table, id)
+  if (!keys.length) return getOne(table, id, userId)
+  const sql = `UPDATE ${table} SET ${keys.map(k => `${k} = ?`).join(', ')} WHERE id = ? AND user_id = ?`
+  db.prepare(sql).run(...keys.map(k => data[k] ?? null), id, userId)
+  return getOne(table, id, userId)
 }
-export function deleteRow(table, id) {
-  db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id)
+export function deleteRow(table, id, userId) {
+  if (userId == null) throw new Error('缺少 user_id')
+  db.prepare(`DELETE FROM ${table} WHERE id = ? AND user_id = ?`).run(id, userId)
 }
-export function clearData() {
+export function clearData(userId) {
+  if (userId == null) throw new Error('缺少 user_id')
   const tables = ['budget_categories', 'expenses', 'items', 'item_categories', 'tasks', 'timeline_events', 'staff', 'guests', 'decorations', 'decoration_images']
-  for (const t of tables) db.prepare(`DELETE FROM ${t}`).run()
+  for (const t of tables) db.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId)
+}
+
+// ---------- 新账号初始化：婚礼设置行 + 默认物品分类 ----------
+export function initUserData(userId) {
+  db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(userId)
+  if (Number(db.prepare('SELECT COUNT(*) AS n FROM item_categories WHERE user_id = ?').get(userId).n) > 0) return
+  const icat = db.prepare('INSERT INTO item_categories (user_id, key, name, icon, sort) VALUES (?,?,?,?,?)')
+  ;[
+    ['bride', '新娘', '👗'], ['groom', '新郎', '🤵'], ['ceremony', '仪式用品', '💍'],
+    ['favor', '喜品伴手礼', '🎁'], ['other', '其他', '📦']
+  ].forEach(([key, name, icon], i) => icat.run(userId, key, name, icon, i))
 }
 
 // ---------- 模板数据 ----------
@@ -227,32 +335,33 @@ export const TIMELINE_TEMPLATE = [
   ['13:30', '送客 · 发放伴手礼', '30分钟', '宴会厅门口', '迎宾组', '']
 ]
 
-export function seedTimeline() {
-  db.prepare('DELETE FROM timeline_events').run()
-  const ev = db.prepare('INSERT INTO timeline_events (time, title, duration, location, owner, note, sort) VALUES (?,?,?,?,?,?,?)')
-  TIMELINE_TEMPLATE.forEach((r, i) => ev.run(...r, i))
+export function seedTimeline(userId) {
+  db.prepare('DELETE FROM timeline_events WHERE user_id = ?').run(userId)
+  const ev = db.prepare('INSERT INTO timeline_events (user_id, time, title, duration, location, owner, note, sort) VALUES (?,?,?,?,?,?,?,?)')
+  TIMELINE_TEMPLATE.forEach((r, i) => ev.run(userId, ...r, i))
 }
 
-export function seedTemplate() {
-  clearData()
-  db.prepare(`UPDATE settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE id=1`)
-    .run('阿伟', '小雅', daysLater(128), '幸福大酒店 · 宴会厅', 130000)
+export function seedTemplate(userId) {
+  clearData(userId)
+  db.prepare('INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)').run(userId)
+  db.prepare(`UPDATE user_settings SET groom_name=?, bride_name=?, wedding_date=?, venue=?, total_budget=? WHERE user_id=?`)
+    .run('阿伟', '小雅', daysLater(128), '幸福大酒店 · 宴会厅', 130000, userId)
 
-  const cat = db.prepare('INSERT INTO budget_categories (name, budget, sort) VALUES (?,?,?)')
+  const cat = db.prepare('INSERT INTO budget_categories (user_id, name, budget, sort) VALUES (?,?,?,?)')
   const catId = {}
   ;[
     ['婚宴酒席', 60000], ['婚纱摄影', 8000], ['婚戒首饰', 15000], ['礼服造型', 6000],
     ['婚礼策划布置', 12000], ['婚车车队', 3000], ['喜糖喜品', 3000], ['司仪摄像', 8000],
     ['蜜月旅行', 10000], ['备用金', 5000]
-  ].forEach(([name, budget], i) => { catId[name] = Number(cat.run(name, budget, i).lastInsertRowid) })
+  ].forEach(([name, budget], i) => { catId[name] = Number(cat.run(userId, name, budget, i).lastInsertRowid) })
 
-  const icat = db.prepare('INSERT INTO item_categories (key, name, icon, sort) VALUES (?,?,?,?)')
+  const icat = db.prepare('INSERT INTO item_categories (user_id, key, name, icon, sort) VALUES (?,?,?,?,?)')
   ;[
     ['bride', '新娘', '👗'], ['groom', '新郎', '🤵'], ['ceremony', '仪式用品', '💍'],
     ['favor', '喜品伴手礼', '🎁'], ['other', '其他', '📦']
-  ].forEach(([key, name, icon], i) => icat.run(key, name, icon, i))
+  ].forEach(([key, name, icon], i) => icat.run(userId, key, name, icon, i))
 
-  const it = db.prepare('INSERT INTO items (category, name, budget_category_id, estimated_price, actual_price, purchased, channel, note, sort) VALUES (?,?,?,?,?,?,?,?,?)')
+  const it = db.prepare('INSERT INTO items (user_id, category, name, budget_category_id, estimated_price, actual_price, purchased, channel, note, sort) VALUES (?,?,?,?,?,?,?,?,?,?)')
   ;[
     ['bride', '主婚纱（租赁）', catId['礼服造型'], 3000, null, 0, '', '含头纱，试纱后定款', 0],
     ['bride', '敬酒服', catId['礼服造型'], 800, null, 0, '', '红色，方便走动', 1],
@@ -278,9 +387,9 @@ export function seedTemplate() {
     ['other', '新娘应急包', 0, 100, null, 0, '', '针线/创可贴/备用丝袜/吸管', 0],
     ['other', '备用雨伞', 0, 60, null, 0, '', '', 1],
     ['other', '充电宝', 0, 100, null, 0, '', '手机全天高耗电', 2]
-  ].forEach(r => it.run(...r))
+  ].forEach(r => it.run(userId, ...r))
 
-  const tk = db.prepare('INSERT INTO tasks (title, phase, due_date, status, assignee, note, sort) VALUES (?,?,?,?,?,?,?)')
+  const tk = db.prepare('INSERT INTO tasks (user_id, title, phase, due_date, status, assignee, note, sort) VALUES (?,?,?,?,?,?,?,?)')
   ;[
     ['确定婚期与总预算', 'm12', daysLater(-200), 'done', '双方', '已与双方父母商定', 0],
     ['双方父母见面', 'm12', daysLater(-190), 'done', '双方', '', 1],
@@ -302,12 +411,12 @@ export function seedTemplate() {
     ['打包婚礼当日物品', 'w1', daysLater(124), 'todo', '伴娘', '应急包/敬茶具/红包', 1],
     ['人员分工最终确认', 'w1', daysLater(125), 'todo', '阿伟', '发到群里', 2],
     ['准备各类红包', 'w1', daysLater(126), 'todo', '妈妈', '改口/堵门/司机/工作人员', 3]
-  ].forEach(r => tk.run(...r))
+  ].forEach(r => tk.run(userId, ...r))
 
-  const ev = db.prepare('INSERT INTO timeline_events (time, title, duration, location, owner, note, sort) VALUES (?,?,?,?,?,?,?)')
-  TIMELINE_TEMPLATE.forEach((r, i) => ev.run(...r, i))
+  const ev = db.prepare('INSERT INTO timeline_events (user_id, time, title, duration, location, owner, note, sort) VALUES (?,?,?,?,?,?,?,?)')
+  TIMELINE_TEMPLATE.forEach((r, i) => ev.run(userId, ...r, i))
 
-  const st = db.prepare('INSERT INTO staff (name, role, phone, duty, event_title) VALUES (?,?,?,?,?)')
+  const st = db.prepare('INSERT INTO staff (user_id, name, role, phone, duty, event_title) VALUES (?,?,?,?,?,?)')
   ;[
     ['', '婚礼总管（统筹）', '', '全场统筹协调，处理突发情况', ''],
     ['', '伴郎（2 名）', '', '陪同新郎，保管戒指，带头堵门', '堵门游戏 · 找婚鞋'],
@@ -317,9 +426,9 @@ export function seedTemplate() {
     ['', '物品保管', '', '烟酒/喜糖/婚纱物品看管', ''],
     ['', '车队总管', '', '车辆调度与路线指引', '新郎车队出发接亲'],
     ['', '酒店对接', '', '协调上菜节奏/音响/大屏播放', '开席 · 新人敬酒']
-  ].forEach(r => st.run(...r))
+  ].forEach(r => st.run(userId, ...r))
 
-  const gu = db.prepare('INSERT INTO guests (name, side, grp, relationship, phone, rsvp, count, table_no, gift, note) VALUES (?,?,?,?,?,?,?,?,?,?)')
+  const gu = db.prepare('INSERT INTO guests (user_id, name, side, grp, relationship, phone, rsvp, count, table_no, gift, note) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
   ;[
     ['大伯一家', 'groom', '家人', '伯父', '138xxxx0001', 'yes', 4, '左1', null, '需要接站'],
     ['姑姑', 'groom', '家人', '姑姑', '138xxxx0002', 'yes', 3, '左1', null, '对海鲜过敏'],
@@ -327,9 +436,9 @@ export function seedTemplate() {
     ['表姨一家', 'bride', '亲戚', '表姨', '139xxxx0001', 'pending', 3, '左2', null, ''],
     ['闺蜜乐乐', 'bride', '朋友', '闺蜜', '139xxxx0002', 'yes', 1, '右2', null, '兼伴娘'],
     ['张阿姨一家', 'bride', '亲戚', '邻居', '139xxxx0003', 'no', 3, '', null, '回老家了，随礼']
-  ].forEach(r => gu.run(...r))
+  ].forEach(r => gu.run(userId, ...r))
 
-  const de = db.prepare('INSERT INTO decorations (area, name, done, source, note, sort) VALUES (?,?,?,?,?,?)')
+  const de = db.prepare('INSERT INTO decorations (user_id, area, name, done, source, note, sort) VALUES (?,?,?,?,?,?,?)')
   ;[
     ['welcome', '迎宾牌 / 照片展示架', 0, '婚庆', '用旅拍照片', 0],
     ['welcome', '拍照背景板', 0, '租赁', '', 1],
@@ -350,7 +459,7 @@ export function seedTemplate() {
     ['home', '婚房气球 + 喜字', 0, '自制', '婚前一晚布置', 0],
     ['home', '红色床品四件套', 0, '自制', '', 1],
     ['home', '压床娃娃', 0, '自制', '', 2]
-  ].forEach(r => de.run(...r))
+  ].forEach(r => de.run(userId, ...r))
 
   markSeeded()
 }
@@ -358,20 +467,21 @@ export function seedTemplate() {
 // ---------- 现场布置区域迁移：旧五区（签到/仪式/宴会/拍照/婚房）→ 新四区（迎宾/签到/宴会/婚房） ----------
 // 仅当仍存在旧区域键（photo/ceremony）时执行；全部迁移完成后不再触发，幂等可重复调用。
 // 映射：拍照区→迎宾区；仪式区→宴会厅（花门/拱门属迎宾动线→迎宾区）；签到区内迎宾类→迎宾区。
-export function migrateDecorationAreas() {
-  const old = db.prepare("SELECT COUNT(*) AS n FROM decorations WHERE area IN ('photo', 'ceremony')").get()
+export function migrateDecorationAreas(userId) {
+  if (userId == null) throw new Error('缺少 user_id')
+  const old = db.prepare("SELECT COUNT(*) AS n FROM decorations WHERE user_id = ? AND area IN ('photo', 'ceremony')").get(userId)
   if (!Number(old.n)) return
-  db.prepare("UPDATE decorations SET area = 'welcome' WHERE area = 'photo'").run()
-  db.prepare("UPDATE decorations SET area = 'welcome' WHERE area = 'ceremony' AND (name LIKE '%花门%' OR name LIKE '%拱门%')").run()
-  db.prepare("UPDATE decorations SET area = 'banquet' WHERE area = 'ceremony'").run()
-  db.prepare("UPDATE decorations SET area = 'welcome' WHERE area = 'sign' AND name LIKE '%迎宾%'").run()
+  db.prepare("UPDATE decorations SET area = 'welcome' WHERE user_id = ? AND area = 'photo'").run(userId)
+  db.prepare("UPDATE decorations SET area = 'welcome' WHERE user_id = ? AND area = 'ceremony' AND (name LIKE '%花门%' OR name LIKE '%拱门%')").run(userId)
+  db.prepare("UPDATE decorations SET area = 'banquet' WHERE user_id = ? AND area = 'ceremony'").run(userId)
+  db.prepare("UPDATE decorations SET area = 'welcome' WHERE user_id = ? AND area = 'sign' AND name LIKE '%迎宾%'").run(userId)
   // 迎宾区条目来自三个旧区域，sort 打散了：按常见动线归一（迎宾牌 → 拍照背景板 → 拍照道具 → 气球 → 花门），其余按 id
   const pri = (name) => /迎宾/.test(name) ? 0 : /拍照背景/.test(name) ? 1 : /拍照道具|相框|灯牌/.test(name) ? 2 : /气球/.test(name) ? 3 : /花门|拱门/.test(name) ? 4 : 5
-  const rows = db.prepare("SELECT id, name FROM decorations WHERE area = 'welcome' ORDER BY id").all()
+  const rows = db.prepare("SELECT id, name FROM decorations WHERE user_id = ? AND area = 'welcome' ORDER BY id").all(userId)
     .sort((a, b) => pri(a.name) - pri(b.name) || a.id - b.id)
-  const upd = db.prepare('UPDATE decorations SET sort = ? WHERE id = ?')
-  rows.forEach((r, i) => upd.run(i, r.id))
-  console.log('现场布置区域已迁移：拍照区/花门/迎宾类 → 迎宾区，仪式区其余 → 宴会厅')
+  const upd = db.prepare('UPDATE decorations SET sort = ? WHERE id = ? AND user_id = ?')
+  rows.forEach((r, i) => upd.run(i, r.id, userId))
+  console.log(`现场布置区域已迁移（账号 ${userId}）：拍照区/花门/迎宾类 → 迎宾区，仪式区其余 → 宴会厅`)
 }
 
 export function isEmpty() {

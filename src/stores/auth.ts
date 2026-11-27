@@ -4,6 +4,7 @@ import { api } from '../api/client'
 export interface AuthUser {
   id: number
   username: string
+  onboarded: boolean
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -26,6 +27,17 @@ export const useAuthStore = defineStore('auth', {
       const r = await api.post<{ user: AuthUser }>('/auth/login', { username, password })
       this.user = r.user
       this.checked = true
+      return r.user
+    },
+    async register(username: string, password: string) {
+      const r = await api.post<{ user: AuthUser }>('/auth/register', { username, password })
+      this.user = r.user
+      this.checked = true
+      return r.user
+    },
+    async completeOnboarding(payload: { skip?: boolean; settings?: Record<string, unknown> }) {
+      const r = await api.post<{ user: AuthUser }>('/auth/onboarding', payload)
+      this.user = r.user
       return r.user
     },
     async updateUsername(username: string) {

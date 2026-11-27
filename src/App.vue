@@ -14,10 +14,18 @@ const route = useRoute()
 
 const isBlank = computed(() => !!route.meta.blank)
 
-// 登录后加载婚礼信息（登录页不请求受保护接口）
-watch([() => auth.user, isBlank], ([user, blank]) => {
-  if (user && !blank) store.loadSettings().catch(() => {})
+// 登录后加载婚礼信息；切换账号或退出时清空缓存，避免看到上一个账号的数据
+watch(() => auth.user?.id, (id, prevId) => {
+  if (!id) {
+    store.$reset()
+    return
+  }
+  if (id !== prevId) store.$reset()
+  if (!isBlank.value) store.loadSettings().catch(() => {})
 }, { immediate: true })
+watch(isBlank, (blank) => {
+  if (!blank && auth.user) store.loadSettings().catch(() => {})
+})
 
 const theme = ref<ThemeName>(currentTheme())
 function toggleTheme() {
