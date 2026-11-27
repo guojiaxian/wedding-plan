@@ -51,6 +51,16 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 })
 })
 
+// 浏览器/手机返回键：统一回到首页，而不是上一个停留页面
+window.addEventListener('popstate', () => {
+  const p = window.location.pathname
+  if (p === '/' || p === '/login') return
+  window.setTimeout(() => {
+    const now = window.location.pathname
+    if (now !== '/' && now !== '/login') router.replace('/')
+  }, 0)
+})
+
 router.beforeEach(async (to) => {
   // 只读分享页无需登录，也不应因已登录而被拦截
   if (to.meta.public) return true

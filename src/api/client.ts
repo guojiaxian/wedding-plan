@@ -9,7 +9,7 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
     // 会话过期：跳转登录页（登录/登出等认证接口由路由守卫处理，避免循环跳转）
     if (res.status === 401 && !url.startsWith('/auth/') && location.pathname !== '/login') {
       const back = location.pathname + location.search
-      location.href = `/login?redirect=${encodeURIComponent(back)}`
+      location.href = back === '/' ? '/login' : `/login?redirect=${encodeURIComponent(back)}`
     }
     throw new Error(data.error || `请求失败 (${res.status})`)
   }
