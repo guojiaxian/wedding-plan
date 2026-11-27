@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{ open: boolean; title: string }>()
+defineProps<{ open: boolean; title: string; center?: boolean }>()
 const emit = defineEmits<{ close: [] }>()
 </script>
 
@@ -7,7 +7,7 @@ const emit = defineEmits<{ close: [] }>()
   <teleport to="body">
     <transition name="modal">
       <!-- 点击遮罩空白不关闭，避免误触丢失已填内容；仅通过 ✕ / 取消按钮关闭 -->
-      <div v-if="open" class="overlay">
+      <div v-if="open" class="overlay" :class="{ center }">
         <div class="panel">
           <div class="head">
             <h3>{{ title }}</h3>
@@ -61,5 +61,8 @@ const emit = defineEmits<{ close: [] }>()
 @media (max-width: 767px) {
   .overlay { padding: 0; align-items: flex-end; }
   .panel { max-width: 100%; border-radius: 18px 18px 0 0; max-height: 90vh; }
+  /* 居中模式：避免被手机输入法遮挡 */
+  .overlay.center { align-items: center; padding: 16px; }
+  .overlay.center .panel { border-radius: 18px; max-height: 88vh; }
 }
 </style>

@@ -254,7 +254,7 @@ async function saveShareSettings() {
       </p>
     </div>
 
-    <UiModal :open="accountModal" title="修改账号信息" @close="accountModal = false">
+    <UiModal :open="accountModal" title="修改账号信息" center @close="accountModal = false">
       <div class="form-grid">
         <div class="field full">
           <label>账号名称（支持中文）</label>
