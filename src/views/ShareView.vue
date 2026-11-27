@@ -97,6 +97,13 @@ const dateText = computed(() => {
   const [y, m, day] = d.split('-')
   return `${y} 年 ${Number(m)} 月 ${Number(day)} 日`
 })
+// 点击场地名称跳转高德地图（移动端优先唤起 App）
+const venueMapUrl = computed(() => {
+  const venue = data.value?.settings.venue?.trim()
+  return venue
+    ? `https://uri.amap.com/search?keyword=${encodeURIComponent(venue)}&callnative=1&src=wedding-plan`
+    : ''
+})
 const countdown = computed(() => {
   const d = data.value?.settings.wedding_date
   if (!d) return null
@@ -249,8 +256,13 @@ function itemSub(it: Item) {
       <header class="share-head">
         <div class="brand-line"><span>💒 备婚计划</span><span class="ro">只读分享</span></div>
         <h1>{{ coupleText }}</h1>
-        <div class="meta" v-if="dateText">📅 {{ dateText }}<template v-if="data.settings.venue"> · 📍 {{ data.settings.venue }}</template></div>
-        <div class="meta" v-else-if="data.settings.venue">📍 {{ data.settings.venue }}</div>
+        <div class="meta" v-if="dateText || data.settings.venue">
+          <template v-if="dateText">📅 {{ dateText }}</template>
+          <template v-if="dateText && data.settings.venue"> · </template>
+          <a v-if="data.settings.venue" class="venue-link" :href="venueMapUrl" target="_blank" rel="noopener">
+            📍 {{ data.settings.venue }}
+          </a>
+        </div>
         <div class="countdown" v-if="countdown !== null">
           <b>{{ Math.abs(countdown) }}</b>
           <span>{{ countdown >= 0 ? '天后婚礼' : '天前已完婚' }}</span>
@@ -535,6 +547,8 @@ function itemSub(it: Item) {
 }
 .share-head h1 { font-size: 22px; font-weight: 800; margin-top: 12px; letter-spacing: .5px; }
 .meta { font-size: 13px; color: var(--secondary); margin-top: 6px; line-height: 1.6; }
+.venue-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 3px; }
+.venue-link:hover { color: var(--primary-deep); }
 .countdown { margin-top: 12px; display: flex; align-items: baseline; gap: 6px; }
 .countdown b { font-size: 36px; font-family: Georgia, serif; color: var(--primary-deep); line-height: 1; }
 .countdown span { font-size: 12.5px; color: var(--secondary); font-weight: 600; }
