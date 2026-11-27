@@ -1,14 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from './stores/app'
+import { useAuthStore } from './stores/auth'
 import { NAV_ITEMS, TAB_ITEMS } from './router'
 import { applyTheme, currentTheme, THEME_LABEL, THEME_ORDER, type ThemeName } from './theme'
 
 const store = useAppStore()
+const auth = useAuthStore()
 const route = useRoute()
 
-store.loadSettings().catch(() => {})
+const isBlank = computed(() => !!route.meta.blank)
+
+// 登录后加载婚礼信息（登录页不请求受保护接口）
+watch([() => auth.user, isBlank], ([user, blank]) => {
+  if (user && !blank) store.loadSettings().catch(() => {})
+}, { immediate: true })
 
 const theme = ref<ThemeName>(currentTheme())
 function toggleTheme() {
@@ -28,7 +35,7 @@ const countdownText = computed(() => {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" v-if="!isBlank">
     <div class="brand">
       <div class="brand-emoji">💒</div>
       <div>
@@ -52,7 +59,7 @@ const countdownText = computed(() => {
     <button class="theme-btn" @click="toggleTheme">🎨 主题：{{ THEME_LABEL[theme] }}</button>
   </aside>
 
-  <div class="topbar">
+  <div class="topbar" v-if="!isBlank">
     <div class="title"><span>💒</span>{{ pageTitle }}</div>
     <div class="topbar-right">
       <router-link to="/settings" class="countdown-chip">{{ countdownText }}</router-link>
@@ -60,7 +67,7 @@ const countdownText = computed(() => {
     </div>
   </div>
 
-  <main class="main">
+  <main class="main" :class="{ 'main-blank': isBlank }">
     <div class="main-inner">
       <router-view v-slot="{ Component }">
         <transition name="fade" mode="out-in">
@@ -70,7 +77,7 @@ const countdownText = computed(() => {
     </div>
   </main>
 
-  <nav class="tabbar">
+  <nav class="tabbar" v-if="!isBlank">
     <router-link v-for="it in TAB_ITEMS" :key="it.path" :to="it.path">
       <span class="ico">{{ it.icon }}</span>{{ it.title }}
     </router-link>

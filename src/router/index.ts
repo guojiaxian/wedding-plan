@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
 
 export const NAV_ITEMS = [
   { path: '/', title: '备婚首页', icon: '🏠' },
@@ -30,6 +31,7 @@ export { TAB_ITEMS }
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', component: () => import('../views/LoginView.vue'), meta: { title: '登录', blank: true } },
     { path: '/', component: () => import('../views/DashboardView.vue'), meta: { title: '备婚首页' } },
     { path: '/budget', component: () => import('../views/BudgetView.vue'), meta: { title: '花销规划' } },
     { path: '/items', component: () => import('../views/ItemsView.vue'), meta: { title: '物品清单' } },
@@ -43,6 +45,16 @@ const router = createRouter({
     { path: '/:pathMatch(.*)*', redirect: '/' }
   ],
   scrollBehavior: () => ({ top: 0 })
+})
+
+router.beforeEach(async (to) => {
+  const auth = useAuthStore()
+  if (!auth.checked) await auth.fetchMe()
+  if (to.meta.blank) return auth.user ? { path: '/' } : true
+  if (!auth.user) {
+    return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
+  }
+  return true
 })
 
 router.afterEach(to => {

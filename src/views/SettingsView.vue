@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { api, toast } from '../api/client'
 import { useAppStore } from '../stores/app'
+import { useAuthStore } from '../stores/auth'
 import { applyTheme, currentTheme, THEME_LABEL, type ThemeName } from '../theme'
 
 const store = useAppStore()
+const auth = useAuthStore()
+const router = useRouter()
 const theme = ref<ThemeName>(currentTheme())
 
 const THEMES: { key: ThemeName; desc: string; swatches: string[] }[] = [
@@ -93,6 +97,30 @@ async function clearAll() {
     setTimeout(() => location.reload(), 800)
   } catch (e: any) { toast(e.message, 'err') }
 }
+
+// ---------- 账号安全 ----------
+const pwd = reactive({ old: '', next: '', confirm: '' })
+const changing = ref(false)
+
+async function changePassword() {
+  if (changing.value) return
+  if (!pwd.old || !pwd.next) return toast('请填写当前密码和新密码', 'err')
+  if (pwd.next.length < 6) return toast('新密码至少 6 位', 'err')
+  if (pwd.next !== pwd.confirm) return toast('两次输入的新密码不一致', 'err')
+  changing.value = true
+  try {
+    await api.post('/auth/password', { oldPassword: pwd.old, newPassword: pwd.next })
+    pwd.old = pwd.next = pwd.confirm = ''
+    toast('密码已修改 ✓')
+  } catch (e: any) { toast(e.message, 'err') }
+  changing.value = false
+}
+
+async function logout() {
+  await auth.logout()
+  toast('已退出登录')
+  router.replace('/login')
+}
 </script>
 
 <template>
@@ -149,6 +177,31 @@ async function clearAll() {
     </div>
 
     <div class="card mt16">
+      <h3 class="section-title" style="margin-top:0">🔐 账号安全</h3>
+      <p class="muted" style="font-size: 13.5px">
+        当前账号：<b>{{ auth.user?.username || 'admin' }}</b> · 支持多台设备同时登录；修改密码不会影响其他已登录设备。
+      </p>
+      <div class="form-grid mt16">
+        <div class="field">
+          <label>当前密码</label>
+          <input class="input" type="password" v-model="pwd.old" autocomplete="current-password" placeholder="请输入当前密码" />
+        </div>
+        <div class="field">
+          <label>新密码（6-64 位）</label>
+          <input class="input" type="password" v-model="pwd.next" autocomplete="new-password" placeholder="请输入新密码" />
+        </div>
+        <div class="field full">
+          <label>确认新密码</label>
+          <input class="input" type="password" v-model="pwd.confirm" autocomplete="new-password" placeholder="再次输入新密码" />
+        </div>
+      </div>
+      <div class="acct-ops">
+        <button class="btn btn-primary" :disabled="changing" @click="changePassword">{{ changing ? '修改中…' : '修改密码' }}</button>
+        <button class="btn btn-danger-ghost" @click="logout">退出登录</button>
+      </div>
+    </div>
+
+    <div class="card mt16">
       <h3 class="section-title" style="margin-top:0">🗄️ 数据管理</h3>
       <p class="muted" style="font-size: 13.5px">
         数据保存在本机数据库中。建议定期导出 JSON 备份，可在其他设备导入恢复，或用于更换电脑时迁移。
@@ -174,6 +227,7 @@ async function clearAll() {
 
 <style scoped>
 .data-ops { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+.acct-ops { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
 .theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 14px; }
 @media (max-width: 480px) { .theme-grid { grid-template-columns: 1fr; } }
 .theme-card {

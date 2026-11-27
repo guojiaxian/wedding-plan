@@ -128,6 +128,25 @@ CREATE TABLE IF NOT EXISTS decoration_images (
   thumb TEXT DEFAULT '',
   data TEXT DEFAULT ''
 );
+
+-- 登录账号：当前为单账号模式（admin），数据为全站共享
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT DEFAULT '',
+  updated_at TEXT DEFAULT ''
+);
+
+-- 登录会话：同一账号可同时存在多条会话（多人/多设备同时登录）
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
 `)
 
 // ---------- 迁移：花销项直接维护「已付」累计（付款不再逐笔记录/展示） ----------

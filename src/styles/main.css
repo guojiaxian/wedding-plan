@@ -182,6 +182,9 @@ button { font-family: inherit; }
 }
 .theme-btn:hover { color: var(--primary-deep); border-color: var(--primary); }
 
+/* 登录页等无框架页面 */
+.main-blank { margin-left: 0 !important; padding: 0 !important; }
+
 /* 移动端顶栏 + 底部导航 */
 .topbar {
   display: none;

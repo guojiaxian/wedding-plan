@@ -8,6 +8,10 @@ import {
   clearData, seedTemplate, isEmpty, isSeeded, markSeeded, localDate, seedTimeline,
   migrateDecorationAreas
 } from './db.js'
+import {
+  SESSION_COOKIE, SESSION_MAX_AGE_MS, ensureAdminUser, createSession, getSessionUser,
+  destroySession, findUserByName, findUserById, verifyPassword, updatePassword
+} from './auth.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -23,6 +27,9 @@ function loadDotEnv(file) {
 // 项目根 .env 优先（生产 PORT=80 / 开发 PORT=19002）；兼容旧的 server/.env
 loadDotEnv(path.join(__dirname, '..', '.env'))
 loadDotEnv(path.join(__dirname, '.env'))
+
+// 首次启动创建 admin 账号（放在 .env 加载之后，以便读取 ADMIN_PASSWORD）
+ensureAdminUser()
 
 // ---------- 文件日志：logs/ 按天轮转，保留 14 天（自包含，不依赖系统 logrotate） ----------
 const LOG_DIR = path.join(__dirname, 'logs')
@@ -96,6 +103,69 @@ const SCHEMA = {
 }
 
 const api = express.Router()
+
+// ---------- 登录认证 ----------
+function readCookie(req, name) {
+  const raw = req.headers.cookie || ''
+  for (const part of raw.split(';')) {
+    const idx = part.indexOf('=')
+    if (idx < 0) continue
+    if (part.slice(0, idx).trim() === name) return decodeURIComponent(part.slice(idx + 1).trim())
+  }
+  return ''
+}
+
+api.post('/auth/login', (req, res) => {
+  const { username, password } = req.body || {}
+  const user = findUserByName(username)
+  if (!user || !verifyPassword(password, user.password_hash)) {
+    return res.status(401).json({ error: '账号或密码错误' })
+  }
+  const token = createSession(user.id)
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: SESSION_MAX_AGE_MS
+  })
+  res.json({ user: { id: user.id, username: user.username } })
+})
+
+// 除登录外的所有 API 都需要有效会话
+api.use((req, res, next) => {
+  const token = readCookie(req, SESSION_COOKIE)
+  const user = getSessionUser(token)
+  if (!user) return res.status(401).json({ error: '请先登录' })
+  req.user = user
+  req.sessionToken = token
+  next()
+})
+
+api.get('/auth/me', (req, res) => res.json({ user: req.user }))
+
+api.post('/auth/logout', (req, res) => {
+  destroySession(req.sessionToken)
+  res.clearCookie(SESSION_COOKIE, { path: '/' })
+  res.json({ ok: true })
+})
+
+// 修改密码：保持其他设备已登录状态（多人共享同一账号）
+api.post('/auth/password', (req, res) => {
+  const { oldPassword, newPassword } = req.body || {}
+  const user = findUserById(req.user.id)
+  if (!user || !verifyPassword(oldPassword, user.password_hash)) {
+    return res.status(400).json({ error: '当前密码不正确' })
+  }
+  const next = String(newPassword || '')
+  if (next.length < 6 || next.length > 64) {
+    return res.status(400).json({ error: '新密码长度需为 6-64 位' })
+  }
+  if (next === String(oldPassword)) {
+    return res.status(400).json({ error: '新密码不能与当前密码相同' })
+  }
+  updatePassword(user.id, next)
+  res.json({ ok: true })
+})
 
 // ---------- 服务端输入净化（前端校验之外的最后一道防线） ----------
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
